@@ -27,15 +27,54 @@ namespace RHI
 		destroy_vulkan_instance();
 	}
 
+	void VulkanContext::PresentSwapChain(std::vector<VkSemaphore> wait_semaphores)
+	{
+		VkPresentInfoKHR presentInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+			.waitSemaphoreCount = static_cast<uint32_t>(wait_semaphores.size()),
+			.pWaitSemaphores = wait_semaphores.data(),
+			.swapchainCount = 1,
+			.pSwapchains = &m_swapchain,
+			.pImageIndices = &m_swapchain_current_image_index,
+			.pResults = nullptr // It¡¯s not necessary if you¡¯re only using a single swap chain
+		};
+		static VkQueue present_queue = GetQueue(m_device_queue_present.value());
+		vkQueuePresentKHR(present_queue, &presentInfo);
+	}
+
+	void VulkanContext::PresentSwapChain(VkSemaphore wait_semaphore)
+	{
+		VkPresentInfoKHR presentInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+			.waitSemaphoreCount = 1,
+			.pWaitSemaphores = &wait_semaphore,
+			.swapchainCount = 1,
+			.pSwapchains = &m_swapchain,
+			.pImageIndices = &m_swapchain_current_image_index,
+			.pResults = nullptr // It¡¯s not necessary if you¡¯re only using a single swap chain
+		};
+		static VkQueue present_queue = GetQueue(m_device_queue_present.value());
+		vkQueuePresentKHR(present_queue, &presentInfo);
+	}
+
 	void VulkanContext::RecreateSwapChain()
 	{
 		static bool RECREATING = false;
 		if (RECREATING) throw std::runtime_error("Failed to recreate the Swap Chain - more than one caller at the same time!");
-
+		
 		RECREATING = true;
 		destroy_swap_chain();
 		create_swap_chain();
 		RECREATING = false;
+	}
+
+	VkResult VulkanContext::NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence, uint64_t timeout/* = std::numeric_limits<uint64_t>::max()*/)
+	{
+		// if VkResult = VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR, 
+		// then you should recreate swapchain, framebuffers, graphics pipelines, and render passes
+		return vkAcquireNextImageKHR(m_device, m_swapchain, timeout, semaphore, fence, &m_swapchain_current_image_index);
 	}
 
 	void VulkanContext::enable_validation_layers()

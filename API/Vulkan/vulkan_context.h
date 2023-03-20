@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <format>
+#include <cassert>
 #include <optional>
 #include <numeric>
 #include <algorithm>
@@ -47,13 +48,20 @@ namespace RHI
 		VkExtent2D								m_swapchain_current_extent;
 		std::vector<VkImage>				m_swapchain_images;
 		std::vector<VkImageView>		m_swapchain_imageviews;
+		uint32_t										m_swapchain_current_image_index{ 0 };
 
 		VkAllocationCallbacks*			m_memory_allocator					= VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT	m_debug_messenger					= VK_NULL_HANDLE;
 
 	public:
+		VkQueue GetQueue(uint32_t queue_family_index, uint32_t queue_index = 0) 
+			{ VkQueue res; vkGetDeviceQueue(m_device, queue_family_index, queue_index, &res); return res; }
+		
+		// Swapchain Functions
+		VkResult NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence, uint64_t timeout = std::numeric_limits<uint64_t>::max());
+		void PresentSwapChain(std::vector<VkSemaphore> wait_semaphores);
+		void PresentSwapChain(VkSemaphore wait_semaphore);
 		void RecreateSwapChain();
-
 	private:
 		std::vector<std::pair<std::optional<uint32_t>*, std::vector<float>>> 
 			m_required_queue_families_with_priorities{
@@ -65,7 +73,8 @@ namespace RHI
 		
 		std::vector<const char*>			m_validation_layers{ "VK_LAYER_KHRONOS_validation" };
 		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-	private:
+
+	public:
 		VulkanContext() = delete;
 		VulkanContext(GLFWwindow* window);
 		~VulkanContext();
@@ -138,19 +147,19 @@ namespace RHI
 			else if (VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT & messageSeverity)
 			{
 				VulkanContext::s_debug_message_statistics[INFO]++;
-				//log::info(" [Vulkan]: {}", pCallbackData->pMessage);
+				//log::info("\n[Vulkan]: {}", pCallbackData->pMessage);
 			}
 			else if (VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT & messageSeverity)
 			{
 				VulkanContext::s_debug_message_statistics[WARN]++;
-				log::warn(" [Vulkan]: {}", pCallbackData->pMessage);
+				log::warn("\n[Vulkan]: {}", pCallbackData->pMessage);
 			}
 			else if (VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT & messageSeverity)
 			{
 				VulkanContext::s_debug_message_statistics[ERROR]++;
-				log::error(" [Vulkan]: {}", pCallbackData->pMessage);
+				log::error("\n[Vulkan]: {}", pCallbackData->pMessage);
 			}
-			else log::critical(" [Vulkan]: Unknow Message Severity {}", messageSeverity);
+			else log::critical("\n[Vulkan]: Unknow Message Severity {}", messageSeverity);
 
 			return VK_FALSE; // Always return false
 		}

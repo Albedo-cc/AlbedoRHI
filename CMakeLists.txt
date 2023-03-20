@@ -36,11 +36,9 @@ add_library(${PROJECT_NAME}
 add_library(Albedo::RHI ALIAS ${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME} INTERFACE include)
+
+find_package(Vulkan REQUIRED)
+target_include_directories(${PROJECT_NAME} PUBLIC ${Vulkan_INCLUDE_DIR})
 target_link_libraries(${PROJECT_NAME} PUBLIC Albedo::log)
 target_link_libraries(${PROJECT_NAME} PUBLIC glfw)
 target_link_libraries(${PROJECT_NAME} PRIVATE VulkanMemoryAllocator)
-
-# Include Optimization
-if (ALBEDO_RHI_API_VULKAN)
-    add_compile_definitions(ALBEDO_RHI_API_VULKAN)
-endif(ALBEDO_RHI_API_VULKAN)
