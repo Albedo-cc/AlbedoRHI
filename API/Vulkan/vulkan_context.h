@@ -5,11 +5,14 @@
 
 #include <AlbedoLog.hpp>
 
+#include "vulkan_memory.h"
+
 #include <vector>
 #include <format>
 #include <cassert>
 #include <optional>
 #include <numeric>
+#include <stdexcept>
 #include <algorithm>
 #include <unordered_set>
 
@@ -40,7 +43,11 @@ namespace RHI
 		std::optional<uint32_t>			m_device_queue_transfer;
 		std::optional<uint32_t>			m_device_queue_sparsebinding;
 
+		std::unique_ptr<VMA>				m_memory_allocator;
+		VkAllocationCallbacks*			m_memory_allocation_callback = VK_NULL_HANDLE;
+
 		VkSwapchainKHR					m_swapchain								= VK_NULL_HANDLE;
+		class											swapchain_error							: public std::exception {}; // Recreation Signal
 		uint32_t										m_swapchain_image_count;		// clamp(minImageCount + 1, maxImageCount)
 		VkFormat									m_swapchain_image_format		= VK_FORMAT_B8G8R8A8_SRGB;
 		VkColorSpaceKHR					m_swapchain_color_space		= VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
@@ -50,18 +57,8 @@ namespace RHI
 		std::vector<VkImageView>		m_swapchain_imageviews;
 		uint32_t										m_swapchain_current_image_index{ 0 };
 
-		VkAllocationCallbacks*			m_memory_allocator					= VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT	m_debug_messenger					= VK_NULL_HANDLE;
 
-	public:
-		VkQueue GetQueue(uint32_t queue_family_index, uint32_t queue_index = 0) 
-			{ VkQueue res; vkGetDeviceQueue(m_device, queue_family_index, queue_index, &res); return res; }
-		
-		// Swapchain Functions
-		VkResult NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence, uint64_t timeout = std::numeric_limits<uint64_t>::max());
-		void PresentSwapChain(std::vector<VkSemaphore> wait_semaphores);
-		void PresentSwapChain(VkSemaphore wait_semaphore);
-		void RecreateSwapChain();
 	private:
 		std::vector<std::pair<std::optional<uint32_t>*, std::vector<float>>> 
 			m_required_queue_families_with_priorities{
@@ -73,6 +70,20 @@ namespace RHI
 		
 		std::vector<const char*>			m_validation_layers{ "VK_LAYER_KHRONOS_validation" };
 		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+
+	public:
+		void WaitDeviceIdle() { vkDeviceWaitIdle(m_device); }
+		VkQueue GetQueue(uint32_t queue_family_index, uint32_t queue_index = 0)
+		{
+			VkQueue res; vkGetDeviceQueue(m_device, queue_family_index, queue_index, &res); return res;
+		}
+
+		// Swapchain Functions (throw swapchain_error means recreation)
+		void NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence,
+			uint64_t timeout = std::numeric_limits<uint64_t>::max()) throw (swapchain_error);
+		void PresentSwapChain(std::vector<VkSemaphore> wait_semaphores) throw (swapchain_error);
+		void PresentSwapChain(VkSemaphore wait_semaphore) throw (swapchain_error);
+		void RecreateSwapChain();
 
 	public:
 		VulkanContext() = delete;

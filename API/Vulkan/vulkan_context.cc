@@ -16,6 +16,8 @@ namespace RHI
 		create_physical_device();
 		create_logical_device();
 		create_swap_chain();
+
+		m_memory_allocator = VMA::Create(this);
 	}
 
 	VulkanContext::~VulkanContext()
@@ -27,7 +29,7 @@ namespace RHI
 		destroy_vulkan_instance();
 	}
 
-	void VulkanContext::PresentSwapChain(std::vector<VkSemaphore> wait_semaphores)
+	void VulkanContext::PresentSwapChain(std::vector<VkSemaphore> wait_semaphores) throw (swapchain_error)
 	{
 		VkPresentInfoKHR presentInfo
 		{
@@ -37,13 +39,17 @@ namespace RHI
 			.swapchainCount = 1,
 			.pSwapchains = &m_swapchain,
 			.pImageIndices = &m_swapchain_current_image_index,
-			.pResults = nullptr // It¡¯s not necessary if you¡¯re only using a single swap chain
+			.pResults = nullptr // Itï¿½ï¿½s not necessary if youï¿½ï¿½re only using a single swap chain
 		};
 		static VkQueue present_queue = GetQueue(m_device_queue_present.value());
-		vkQueuePresentKHR(present_queue, &presentInfo);
+		auto result = vkQueuePresentKHR(present_queue, &presentInfo);
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+			throw swapchain_error();
+		else if (result != VK_SUCCESS)
+			throw std::runtime_error("Failed to present the Vulkan Swap Chain!");
 	}
 
-	void VulkanContext::PresentSwapChain(VkSemaphore wait_semaphore)
+	void VulkanContext::PresentSwapChain(VkSemaphore wait_semaphore)  throw (swapchain_error)
 	{
 		VkPresentInfoKHR presentInfo
 		{
@@ -53,10 +59,14 @@ namespace RHI
 			.swapchainCount = 1,
 			.pSwapchains = &m_swapchain,
 			.pImageIndices = &m_swapchain_current_image_index,
-			.pResults = nullptr // It¡¯s not necessary if you¡¯re only using a single swap chain
+			.pResults = nullptr // It is not necessary if you are only using a single swap chain
 		};
 		static VkQueue present_queue = GetQueue(m_device_queue_present.value());
-		vkQueuePresentKHR(present_queue, &presentInfo);
+		auto result = vkQueuePresentKHR(present_queue, &presentInfo);
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+			throw swapchain_error();
+		else if (result != VK_SUCCESS)
+			throw std::runtime_error("Failed to present the Vulkan Swap Chain!");
 	}
 
 	void VulkanContext::RecreateSwapChain()
@@ -64,17 +74,21 @@ namespace RHI
 		static bool RECREATING = false;
 		if (RECREATING) throw std::runtime_error("Failed to recreate the Swap Chain - more than one caller at the same time!");
 		
+		WaitDeviceIdle();
 		RECREATING = true;
 		destroy_swap_chain();
 		create_swap_chain();
 		RECREATING = false;
 	}
 
-	VkResult VulkanContext::NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence, uint64_t timeout/* = std::numeric_limits<uint64_t>::max()*/)
+	void VulkanContext::NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence, uint64_t timeout/* = std::numeric_limits<uint64_t>::max()*/)
+		throw (swapchain_error)
 	{
-		// if VkResult = VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR, 
-		// then you should recreate swapchain, framebuffers, graphics pipelines, and render passes
-		return vkAcquireNextImageKHR(m_device, m_swapchain, timeout, semaphore, fence, &m_swapchain_current_image_index);
+		auto result = vkAcquireNextImageKHR(m_device, m_swapchain, timeout, semaphore, fence, &m_swapchain_current_image_index);
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+			throw swapchain_error();
+		else if (result != VK_SUCCESS)
+			throw std::runtime_error("Failed to retrive the next image of the Vulkan Swap Chain!");
 	}
 
 	void VulkanContext::enable_validation_layers()
@@ -171,7 +185,7 @@ namespace RHI
 		if (glfwCreateWindowSurface(
 			m_instance,
 			m_window,
-			m_memory_allocator,
+			m_memory_allocation_callback,
 			&m_surface) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Window Surface!");
 	}
@@ -239,7 +253,7 @@ namespace RHI
 			.pEnabledFeatures = &m_physical_device_features
 		};
 
-		if (vkCreateDevice(m_physical_device, &deviceCreateInfo, m_memory_allocator, &m_device) != VK_SUCCESS)
+		if (vkCreateDevice(m_physical_device, &deviceCreateInfo, m_memory_allocation_callback, &m_device) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the logical device!");
 	}
 
@@ -308,7 +322,7 @@ namespace RHI
 			.clipped = VK_TRUE, // Means that we do not care about the color of pixels that are obscured for the best performance. (P89)
 			.oldSwapchain = VK_NULL_HANDLE // Modify this field later (resize)
 		};
-		if (vkCreateSwapchainKHR(m_device, &swapChainCreateInfo, m_memory_allocator, &m_swapchain) != VK_SUCCESS)
+		if (vkCreateSwapchainKHR(m_device, &swapChainCreateInfo, m_memory_allocation_callback, &m_swapchain) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Swap Chain!");
 
 		// Retrieve the swap chain images
@@ -336,7 +350,7 @@ namespace RHI
 													.baseArrayLayer = 0,
 													.layerCount = 1}
 			};
-			if (vkCreateImageView(m_device, &imageViewCreateInfo, m_memory_allocator, &m_swapchain_imageviews[idx]) != VK_SUCCESS)
+			if (vkCreateImageView(m_device, &imageViewCreateInfo, m_memory_allocation_callback, &m_swapchain_imageviews[idx]) != VK_SUCCESS)
 				throw std::runtime_error("Failed to create all image views");
 		}
 	}
@@ -344,14 +358,14 @@ namespace RHI
 	void VulkanContext::destroy_swap_chain()
 	{
 		for (auto imageview : m_swapchain_imageviews)
-			vkDestroyImageView(m_device, imageview, m_memory_allocator);
-		vkDestroySwapchainKHR(m_device, m_swapchain, m_memory_allocator);
+			vkDestroyImageView(m_device, imageview, m_memory_allocation_callback);
+		vkDestroySwapchainKHR(m_device, m_swapchain, m_memory_allocation_callback);
 	}
 
 	void VulkanContext::destroy_logical_device()
 	{
 		vkDeviceWaitIdle(m_device);
-		vkDestroyDevice(m_device, m_memory_allocator);
+		vkDestroyDevice(m_device, m_memory_allocation_callback);
 	}
 
 	void VulkanContext::destroy_debug_messenger()
@@ -362,18 +376,18 @@ namespace RHI
 		log::info("WARN: {}", s_debug_message_statistics[WARN]);
 		log::info("ERROR: {}\n", s_debug_message_statistics[ERROR]);
 		auto loadFunction = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(m_instance, "vkDestroyDebugUtilsMessengerEXT");
-		if (loadFunction != nullptr) loadFunction(m_instance, m_debug_messenger, m_memory_allocator);
+		if (loadFunction != nullptr) loadFunction(m_instance, m_debug_messenger, m_memory_allocation_callback);
 		else throw std::runtime_error("Failed to load function: vkDestroyDebugUtilsMessengerEXT");
 	}
 
 	void VulkanContext::destroy_surface()
 	{
-		vkDestroySurfaceKHR(m_instance, m_surface, m_memory_allocator);
+		vkDestroySurfaceKHR(m_instance, m_surface, m_memory_allocation_callback);
 	}
 
 	void VulkanContext::destroy_vulkan_instance()
 	{
-		vkDestroyInstance(m_instance, m_memory_allocator);
+		vkDestroyInstance(m_instance, m_memory_allocation_callback);
 	}
 
 	bool VulkanContext::check_physical_device_features_support()

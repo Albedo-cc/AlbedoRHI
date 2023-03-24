@@ -30,7 +30,7 @@ namespace RHI
 		if (vkCreateRenderPass(
 			m_context->m_device,
 			&renderPassCreateInfo,
-			m_context->m_memory_allocator,
+			m_context->m_memory_allocation_callback,
 			&m_render_pass) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Render Pass!");
 
@@ -82,7 +82,7 @@ namespace RHI
 		if (vkCreatePipelineLayout(
 			m_context->m_device,
 			&pipeline_layout_state,
-			m_context->m_memory_allocator,
+			m_context->m_memory_allocation_callback,
 			&m_pipeline_layout) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Pipeline Layout!");
 
@@ -127,13 +127,13 @@ namespace RHI
 			m_pipeline_cache,
 			1,
 			&graphicsPipelineCreateInfo,
-			m_context->m_memory_allocator,
+			m_context->m_memory_allocation_callback,
 			&m_pipeline) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Graphics Pipeline!");
 
 		for (auto& shader_stage : shader_stage_state)
 		{
-			vkDestroyShaderModule(m_context->m_device, shader_stage.module, m_context->m_memory_allocator);
+			vkDestroyShaderModule(m_context->m_device, shader_stage.module, m_context->m_memory_allocation_callback);
 		}
 	}
 
@@ -165,7 +165,7 @@ namespace RHI
 		if (vkCreateShaderModule(
 			m_context->m_device,
 			&shaderModuleCreateInfo,
-			m_context->m_memory_allocator,
+			m_context->m_memory_allocation_callback,
 			&shader_module) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create shader module!");
 
@@ -185,7 +185,7 @@ namespace RHI
 		if (vkCreateFramebuffer(
 			m_context->m_device,
  			&create_info,
-			m_context->m_memory_allocator,
+			m_context->m_memory_allocation_callback,
 			&framebuffer) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Framebuffer!");
 
@@ -276,7 +276,7 @@ namespace RHI
 		if (vkCreateCommandPool(
 			m_context->m_device,
 			&commandPoolCreateInfo,
-			m_context->m_memory_allocator,
+			m_context->m_memory_allocation_callback,
 			&m_command_pool) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Command Pool!");
 	}
@@ -301,9 +301,16 @@ namespace RHI
 		if (vkCreateSemaphore(
 			m_context->m_device,
 			&semaphoreCreateInfo,
-			m_context->m_memory_allocator,
+			m_context->m_memory_allocation_callback,
 			&m_semaphore) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Semaphore!");
+	}
+
+	Semaphore::Semaphore(Semaphore&& rvalue) noexcept :
+		m_context{ rvalue.m_context },
+		m_semaphore{ rvalue.m_semaphore }
+	{
+
 	}
 
 	Fence::Fence(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkFenceCreateFlags flags) :
@@ -317,9 +324,16 @@ namespace RHI
 		if (vkCreateFence(
 			m_context->m_device,
 			&fenceCreateInfo,
-			m_context->m_memory_allocator,
+			m_context->m_memory_allocation_callback,
 			&m_fence) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Fence!");
+	}
+
+	Fence::Fence(Fence&& rvalue) noexcept :
+		m_context{ rvalue.m_context },
+		m_fence{ rvalue.m_fence }
+	{
+
 	}
 
 }} // namespace Albedo::RHI

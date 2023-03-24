@@ -20,8 +20,8 @@ namespace RHI
 	// Implementation
 	class CommandPool
 	{
-		using CommandBufferToken = size_t;
 	public:
+		using CommandBufferToken = size_t;
 		friend class CommandBuffer;
 		class CommandBuffer
 		{
@@ -62,7 +62,7 @@ namespace RHI
 		CommandPool(std::shared_ptr<VulkanContext> vulkan_context,
 									uint32_t target_queue_family,
 									VkCommandPoolCreateFlags command_pool_flags);
-		~CommandPool() { vkDestroyCommandPool(m_context->m_device, m_command_pool, m_context->m_memory_allocator); }
+		~CommandPool() { vkDestroyCommandPool(m_context->m_device, m_command_pool, m_context->m_memory_allocation_callback); }
 
 	private:
 		std::shared_ptr<VulkanContext> m_context;
@@ -84,7 +84,7 @@ namespace RHI
 		{
 			if (m_framebuffers.empty()) return;
 			for (auto& frame_buffer : m_framebuffers)
-				vkDestroyFramebuffer(m_context->m_device, frame_buffer, m_context->m_memory_allocator);
+				vkDestroyFramebuffer(m_context->m_device, frame_buffer, m_context->m_memory_allocation_callback);
 			m_framebuffers.clear();
 		}
 		VkFramebuffer& operator[](FramebufferToken token){ return m_framebuffers[token]; }
@@ -139,7 +139,7 @@ namespace RHI
 		RenderPass(std::shared_ptr<RHI::VulkanContext> vulkan_context);
 		virtual ~RenderPass() noexcept 
 		{ 
-			vkDestroyRenderPass(m_context->m_device, m_render_pass, m_context->m_memory_allocator); 
+			vkDestroyRenderPass(m_context->m_device, m_render_pass, m_context->m_memory_allocation_callback); 
 		}
 	};
 
@@ -174,8 +174,8 @@ namespace RHI
 										VkPipeline base_pipeline = VK_NULL_HANDLE, int32_t base_pipeline_index = -1);
 		virtual ~GraphicsPipeline() noexcept
 		{
-			vkDestroyPipelineLayout(m_context->m_device, m_pipeline_layout, m_context->m_memory_allocator);
-			vkDestroyPipeline(m_context->m_device, m_pipeline, m_context->m_memory_allocator);
+			vkDestroyPipelineLayout(m_context->m_device, m_pipeline_layout, m_context->m_memory_allocation_callback);
+			vkDestroyPipeline(m_context->m_device, m_pipeline, m_context->m_memory_allocation_callback);
 		}
 
 	protected:
@@ -200,7 +200,9 @@ namespace RHI
 	public:
 		Semaphore() = delete;
 		Semaphore(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkSemaphoreCreateFlags flags);
-		~Semaphore() { vkDestroySemaphore(m_context->m_device, m_semaphore, m_context->m_memory_allocator); }
+		~Semaphore() { log::warn("Del Sema"); vkDestroySemaphore(m_context->m_device, m_semaphore, m_context->m_memory_allocation_callback); }
+		Semaphore(const Semaphore&) = delete;
+		Semaphore(Semaphore&& rvalue) noexcept;
 		operator VkSemaphore() { return m_semaphore; }
 
 	private:
@@ -211,10 +213,10 @@ namespace RHI
 	class Fence
 	{
 	public:
-		void Wait(uint64_t timeout = std::numeric_limits<uint64_t>::max()) 
+		void Wait(bool reset = false, uint64_t timeout = std::numeric_limits<uint64_t>::max()) 
 		{ 
 			vkWaitForFences(m_context->m_device, 1, &m_fence, VK_TRUE, timeout); 
-			Reset();
+			if (reset) Reset();
 		}
 
 		void Reset()
@@ -224,7 +226,9 @@ namespace RHI
 
 		Fence() = delete;
 		Fence(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkFenceCreateFlags flags);
-		~Fence() { vkDestroyFence(m_context->m_device, m_fence, m_context->m_memory_allocator); }
+		~Fence() { log::warn("Del Fen"); vkDestroyFence(m_context->m_device, m_fence, m_context->m_memory_allocation_callback); }
+		Fence(const Fence&) = delete;
+		Fence(Fence&& rvalue) noexcept;
 		operator VkFence() { return m_fence; }
 
 	private:
