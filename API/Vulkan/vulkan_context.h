@@ -5,11 +5,13 @@
 
 #include <AlbedoLog.hpp>
 
+#include "vulkan_wrapper.h"
 #include "vulkan_memory.h"
 
 #include <vector>
 #include <format>
 #include <cassert>
+#include <memory>
 #include <optional>
 #include <numeric>
 #include <stdexcept>
@@ -25,7 +27,8 @@ namespace RHI
 	constexpr const bool EnableValidationLayers = true;
 #endif
 
-	class VulkanContext
+	// Factory (You should create most of vulkan objects in via Vulkan Context: CreateXX functions)
+	class VulkanContext : public std::enable_shared_from_this<VulkanContext>
 	{
 	public:
 		VkInstance								m_instance									= VK_NULL_HANDLE;
@@ -68,15 +71,16 @@ namespace RHI
 		std::vector<VkPresentModeKHR> m_surface_present_modes;
 		std::vector<VkSurfaceFormatKHR> m_surface_formats; // 1.VK_FORMAT_X 2. VK_COLOR_SPACE_X
 		
-		std::vector<const char*>			m_validation_layers{ "VK_LAYER_KHRONOS_validation" };
-		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+		std::vector<const char*>			m_validation_layers{	"VK_LAYER_KHRONOS_validation",
+																									"VK_LAYER_RENDERDOC_Capture"};
+		std::vector<const char*>			m_device_extensions{ VK_EXT_DEBUG_MARKER_EXTENSION_NAME,
+																									 VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
 	public:
-		void WaitDeviceIdle() { vkDeviceWaitIdle(m_device); }
-		VkQueue GetQueue(uint32_t queue_family_index, uint32_t queue_index = 0)
-		{
-			VkQueue res; vkGetDeviceQueue(m_device, queue_family_index, queue_index, &res); return res;
-		}
+		void WaitDeviceIdle() { vkDeviceWaitIdle(m_device); }		
+
+		std::shared_ptr<CommandBuffer> GetOneTimeCommandBuffer();
+		VkQueue GetQueue(uint32_t queue_family_index, uint32_t queue_index = 0) { VkQueue res; vkGetDeviceQueue(m_device, queue_family_index, queue_index, &res); return res; }
 
 		// Swapchain Functions (throw swapchain_error means recreation)
 		void NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence,
@@ -84,6 +88,15 @@ namespace RHI
 		void PresentSwapChain(std::vector<VkSemaphore> wait_semaphores) throw (swapchain_error);
 		void PresentSwapChain(VkSemaphore wait_semaphore) throw (swapchain_error);
 		void RecreateSwapChain();
+
+	public:
+		// Products
+		std::shared_ptr<CommandPool>		CreateCommandPool(	uint32_t submit_queue_family_index,
+																												VkCommandPoolCreateFlags command_pool_flags);
+		std::shared_ptr<FramebufferPool>	CreateFramebufferPool();
+
+		std::unique_ptr<Semaphore>				CreateSemaphore(VkSemaphoreCreateFlags flags);
+		std::unique_ptr<Fence>						CreateFence(VkFenceCreateFlags flags);
 
 	public:
 		VulkanContext() = delete;

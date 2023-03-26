@@ -1,3 +1,4 @@
+#include "vulkan_context.h"
 #include "vulkan_wrapper.h"
 
 namespace Albedo {
@@ -7,6 +8,11 @@ namespace RHI
 		m_context{ std::move(vulkan_context) }
 	{
 
+	}
+
+	RenderPass::~RenderPass()
+	{
+		vkDestroyRenderPass(m_context->m_device, m_render_pass, m_context->m_memory_allocation_callback);
 	}
 
 	void RenderPass::Initialize()
@@ -37,9 +43,9 @@ namespace RHI
 		create_pipelines();
 	}
 
-	void RenderPass::Begin(CommandPool::CommandBuffer& command_buffer, VkFramebuffer& framebuffer)
+	void RenderPass::Begin(std::shared_ptr<CommandBuffer> command_buffer, VkFramebuffer& framebuffer)
 	{
-		assert(command_buffer.IsRecording() && "You must Begin() the command buffer before Begin() the render pass!");
+		assert(command_buffer->IsRecording() && "You must Begin() the command buffer before Begin() the render pass!");
 
 		static auto clear_color = set_clear_colors();
 		VkRenderPassBeginInfo renderPassBeginInfo
@@ -51,16 +57,26 @@ namespace RHI
 			.clearValueCount = static_cast<uint32_t>(clear_color.size()),
 			.pClearValues = clear_color.data()
 		};
-		VkSubpassContents contents = command_buffer.GetLevel() == VK_COMMAND_BUFFER_LEVEL_PRIMARY? 
+		VkSubpassContents contents = command_buffer->GetLevel() == VK_COMMAND_BUFFER_LEVEL_PRIMARY? 
 																 VK_SUBPASS_CONTENTS_INLINE : VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS;
-		vkCmdBeginRenderPass(command_buffer, &renderPassBeginInfo, contents);
+		vkCmdBeginRenderPass(*command_buffer, &renderPassBeginInfo, contents);
 	}
 
-	void RenderPass::End(CommandPool::CommandBuffer& command_buffer)
+	void RenderPass::End(std::shared_ptr<CommandBuffer> command_buffer)
 	{
-		assert(command_buffer.IsRecording() && "You must Begin() the command buffer before End() the render pass!");
+		assert(command_buffer->IsRecording() && "You must Begin() the command buffer before End() the render pass!");
 
-		vkCmdEndRenderPass(command_buffer);
+		vkCmdEndRenderPass(*command_buffer);
+	}
+
+	std::vector<VkClearValue>	RenderPass::set_clear_colors()
+	{
+		return { { { {0.0,0.0,0.0,1.0} } } }; 
+	} 
+
+	VkRect2D RenderPass::set_render_area()
+	{ 
+		return { { 0,0 }, m_context->m_swapchain_current_extent };
 	}
 
 	GraphicsPipeline::GraphicsPipeline(std::shared_ptr<RHI::VulkanContext> vulkan_context,
@@ -73,6 +89,12 @@ namespace RHI
 		m_base_pipeline_index { base_pipeline_index }
 	{
 
+	}
+
+	GraphicsPipeline::~GraphicsPipeline()
+	{
+		vkDestroyPipelineLayout(m_context->m_device, m_pipeline_layout, m_context->m_memory_allocation_callback);
+		vkDestroyPipeline(m_context->m_device, m_pipeline, m_context->m_memory_allocation_callback);
 	}
 
 	void GraphicsPipeline::Initialize()
@@ -178,6 +200,14 @@ namespace RHI
 
 	}
 
+	void FramebufferPool::Clear()
+	{
+		if (m_framebuffers.empty()) return;
+		for (auto& frame_buffer : m_framebuffers)
+			vkDestroyFramebuffer(m_context->m_device, frame_buffer, m_context->m_memory_allocation_callback);
+		m_framebuffers.clear();
+	}
+
 	FramebufferPool::FramebufferToken FramebufferPool::
 		AllocateFramebuffer(VkFramebufferCreateInfo& create_info)
 	{
@@ -189,36 +219,25 @@ namespace RHI
 			&framebuffer) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Framebuffer!");
 
-		return size() - 1;
+		return Size() - 1;
 	}
 
-	CommandPool::CommandBuffer::CommandBuffer(
-		CommandPool* command_pool,
-		VkCommandBufferLevel level):
-		m_parent{ command_pool },
-		m_level{ level }
+	CommandBuffer::CommandBuffer(std::shared_ptr<CommandPool> parent, VkCommandBufferLevel level) :
+		m_parent{ std::move(parent) }, m_level{ level }
 	{
-		VkCommandBufferAllocateInfo commandBufferAllocateInfo
-		{
-			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-			.commandPool = *m_parent,
-			.level = m_level,
-			.commandBufferCount = 1
-		};
-		if (vkAllocateCommandBuffers(m_parent->m_context->m_device, &commandBufferAllocateInfo, &m_command_buffer) != VK_SUCCESS)
-			throw std::runtime_error("Failed to create the Vulkan Command Buffer!");
+		
 	}
 
-	void CommandPool::CommandBuffer::Begin(VkCommandBufferUsageFlags usage_flags, VkCommandBufferResetFlags reset_flags, const VkCommandBufferInheritanceInfo* inheritanceInfo/* = nullptr*/)
+	void CommandBufferReset::Begin(VkCommandBufferInheritanceInfo* inheritanceInfo/* = nullptr*/)
 	{
 		assert(!IsRecording() && "You cannot Begin() a recording Vulkan Command Buffer!");
 
-		vkResetCommandBuffer(m_command_buffer, reset_flags);
+		vkResetCommandBuffer(m_command_buffer, 0);
 
 		VkCommandBufferBeginInfo commandBufferBeginInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-			.flags = usage_flags,
+			.flags = 0,
 			.pInheritanceInfo = inheritanceInfo
 		};
 		if (vkBeginCommandBuffer(m_command_buffer, &commandBufferBeginInfo) != VK_SUCCESS)
@@ -227,21 +246,21 @@ namespace RHI
 		m_is_recording = true;
 	}
 
-	void CommandPool::CommandBuffer::End()
+	void CommandBufferReset::End()
 	{
 		assert(IsRecording() && "You cannot End() an idle Vulkan Command Buffer!");
 		if (vkEndCommandBuffer(m_command_buffer) != VK_SUCCESS)
 			throw std::runtime_error("Failed to end the Vulkan Command Buffer!");
-
 		m_is_recording = false;
 	}
 
-	void CommandPool::CommandBuffer::Submit(
-		uint32_t target_queue_index,
-		VkFence fence,
-		VkPipelineStageFlags which_pipeline_stages_to_wait,
-		std::vector<VkSemaphore> wait_semaphores,
-		std::vector<VkSemaphore> signal_semaphores)
+	void CommandBufferReset::Submit(
+		bool wait_queue_idle/* = false*/,
+		VkFence fence/* = VK_NULL_HANDLE*/,
+		std::vector<VkSemaphore> wait_semaphores/* = {}*/,
+		std::vector<VkSemaphore> signal_semaphores/* = {}*/,
+		VkPipelineStageFlags which_pipeline_stages_to_wait/* = 0*/,
+		uint32_t target_queue_index/* = 0*/)
 	{
 		VkSubmitInfo submitInfo
 		{
@@ -254,23 +273,78 @@ namespace RHI
 			.signalSemaphoreCount = static_cast<uint32_t>(signal_semaphores.size()),
 			.pSignalSemaphores = signal_semaphores.data()
 		};
-		VkQueue target_queue = m_parent->m_context->GetQueue(m_parent->m_target_queue_family, target_queue_index);
-		if (vkQueueSubmit(target_queue, 1, &submitInfo, fence) != VK_SUCCESS)
+		
+		auto& submit_queue = m_parent->m_submit_queue_family;
+		if (vkQueueSubmit(submit_queue, 1, &submitInfo, fence) != VK_SUCCESS)
 			throw std::runtime_error("Failed to submit the Vulkan Command Buffer!");
+		if (wait_queue_idle) vkQueueWaitIdle(submit_queue);
+	}
+
+	void CommandBufferOneTime::Begin(VkCommandBufferInheritanceInfo* inheritanceInfo/* = nullptr*/)
+	{
+		assert(!IsRecording() && "You cannot Begin() a recording Vulkan Command Buffer!");
+
+		VkCommandBufferBeginInfo commandBufferBeginInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			.flags = 0,
+			.pInheritanceInfo = inheritanceInfo
+		};
+		if (vkBeginCommandBuffer(m_command_buffer, &commandBufferBeginInfo) != VK_SUCCESS)
+			throw std::runtime_error("Failed to begin the Vulkan Command Buffer!");
+
+		m_is_recording = true;
+	}
+
+	void CommandBufferOneTime::End()
+	{
+		assert(IsRecording() && "You cannot End() an idle Vulkan Command Buffer!");
+		if (vkEndCommandBuffer(m_command_buffer) != VK_SUCCESS)
+			throw std::runtime_error("Failed to end the Vulkan Command Buffer!");
+		m_is_recording = false;
+	}
+
+	void CommandBufferOneTime::Submit(
+		bool wait_queue_idle/* = false*/,
+		VkFence fence/* = VK_NULL_HANDLE*/,
+		std::vector<VkSemaphore> wait_semaphores/* = {}*/,
+		std::vector<VkSemaphore> signal_semaphores/* = {}*/,
+		VkPipelineStageFlags which_pipeline_stages_to_wait/* = 0*/,
+		uint32_t target_queue_index/* = 0*/)
+	{
+		VkSubmitInfo submitInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+			.waitSemaphoreCount = static_cast<uint32_t>(wait_semaphores.size()),
+			.pWaitSemaphores = wait_semaphores.data(),
+			.pWaitDstStageMask = &which_pipeline_stages_to_wait,
+			.commandBufferCount = 1,
+			.pCommandBuffers = &m_command_buffer,
+			.signalSemaphoreCount = static_cast<uint32_t>(signal_semaphores.size()),
+			.pSignalSemaphores = signal_semaphores.data()
+		};
+
+		auto& submit_queue = m_parent->m_submit_queue_family;
+		if (vkQueueSubmit(submit_queue, 1, &submitInfo, fence) != VK_SUCCESS)
+			throw std::runtime_error("Failed to submit the Vulkan Command Buffer!");
+		if (wait_queue_idle) vkQueueWaitIdle(submit_queue);
+
+		vkFreeCommandBuffers(m_parent->m_context->m_device, *m_parent, 1, &m_command_buffer);
 	}
 
 	CommandPool::CommandPool(
 		std::shared_ptr<VulkanContext> vulkan_context,
-		uint32_t target_queue_family,
+		uint32_t submit_queue_family_index,
 		VkCommandPoolCreateFlags command_pool_flags) :
 		m_context{ std::move(vulkan_context) },
-		m_target_queue_family{ target_queue_family }
+		m_submit_queue_family{ m_context->GetQueue(submit_queue_family_index) },
+		m_command_pool_flags{ command_pool_flags }
 	{
 		VkCommandPoolCreateInfo commandPoolCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 			.flags = command_pool_flags,
-			.queueFamilyIndex = target_queue_family
+			.queueFamilyIndex = submit_queue_family_index
 		};
 
 		if (vkCreateCommandPool(
@@ -281,13 +355,41 @@ namespace RHI
 			throw std::runtime_error("Failed to create the Vulkan Command Pool!");
 	}
 
-	CommandPool::CommandBufferToken CommandPool::
+	CommandPool::~CommandPool()
+	{
+		vkDestroyCommandPool(m_context->m_device, m_command_pool, m_context->m_memory_allocation_callback);
+	}
+
+	std::shared_ptr<CommandBuffer> CommandPool::
 		AllocateCommandBuffer(VkCommandBufferLevel level)
 	{
 		// Command buffers will be automatically freed when their command pool is destroyed
-		m_command_buffers.emplace_back(this, level);
-		
-		return size() - 1;
+		std::shared_ptr<CommandBuffer> commandbuffer;
+		if (m_command_pool_flags & VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT)
+		{
+			commandbuffer = std::make_shared<CommandBufferReset>(shared_from_this(), level);
+		}
+		else if (m_command_pool_flags & VK_COMMAND_POOL_CREATE_TRANSIENT_BIT)
+		{
+			commandbuffer = std::make_shared<CommandBufferOneTime>(shared_from_this(), level);
+		}
+		else throw std::runtime_error("Failed to allocate a proper Vulkan Command Buffer!");
+
+		VkCommandBufferAllocateInfo commandBufferAllocateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+			.commandPool = m_command_pool,
+			.level = level,
+			.commandBufferCount = 1
+		};
+
+		if (vkAllocateCommandBuffers(
+			m_context->m_device, 
+			&commandBufferAllocateInfo, 
+			&commandbuffer->m_command_buffer) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create the Vulkan Command Buffer!");
+
+		return commandbuffer;
 	}
 
 	Semaphore::Semaphore(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkSemaphoreCreateFlags flags) :
@@ -313,6 +415,11 @@ namespace RHI
 
 	}
 
+	Semaphore::~Semaphore()
+	{
+		vkDestroySemaphore(m_context->m_device, m_semaphore, m_context->m_memory_allocation_callback);
+	}
+
 	Fence::Fence(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkFenceCreateFlags flags) :
 		m_context{ std::move(vulkan_context) }
 	{
@@ -334,6 +441,22 @@ namespace RHI
 		m_fence{ rvalue.m_fence }
 	{
 
+	}
+
+	Fence::~Fence()
+	{ 
+		vkDestroyFence(m_context->m_device, m_fence, m_context->m_memory_allocation_callback); 
+	}
+
+	void Fence::Wait(bool reset/* = false*/, uint64_t timeout/* = std::numeric_limits<uint64_t>::max()*/)
+	{
+		vkWaitForFences(m_context->m_device, 1, &m_fence, VK_TRUE, timeout);
+		if (reset) Reset();
+	}
+
+	void Fence::Reset()
+	{
+		vkResetFences(m_context->m_device, 1, &m_fence);
 	}
 
 }} // namespace Albedo::RHI

@@ -1,4 +1,5 @@
 #include "vulkan_context.h"
+#include "vulkan_wrapper.h"
 
 namespace Albedo {
 namespace RHI
@@ -39,7 +40,7 @@ namespace RHI
 			.swapchainCount = 1,
 			.pSwapchains = &m_swapchain,
 			.pImageIndices = &m_swapchain_current_image_index,
-			.pResults = nullptr // It��s not necessary if you��re only using a single swap chain
+			.pResults = nullptr // It is not necessary if you are only using a single swap chain
 		};
 		static VkQueue present_queue = GetQueue(m_device_queue_present.value());
 		auto result = vkQueuePresentKHR(present_queue, &presentInfo);
@@ -79,6 +80,15 @@ namespace RHI
 		destroy_swap_chain();
 		create_swap_chain();
 		RECREATING = false;
+	}
+
+	std::shared_ptr<CommandBuffer> VulkanContext::GetOneTimeCommandBuffer()
+	{
+		static std::shared_ptr<CommandPool> commandPool_transient{ std::make_shared<CommandPool>(
+																							shared_from_this(), 
+																							 m_device_queue_graphics.value(), 
+																							 VK_COMMAND_POOL_CREATE_TRANSIENT_BIT)};
+		return commandPool_transient->AllocateCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 	}
 
 	void VulkanContext::NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence, uint64_t timeout/* = std::numeric_limits<uint64_t>::max()*/)
@@ -125,7 +135,11 @@ namespace RHI
 		const char** glfwExtensions;
 		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount); // Include WSI extensions
 		std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
-		if (EnableValidationLayers) extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		if (EnableValidationLayers)
+		{
+			extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+			extensions.emplace_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+		}
 
 		// Instance
 		VkApplicationInfo appInfo
@@ -135,7 +149,7 @@ namespace RHI
 			.applicationVersion = VK_MAKE_VERSION(1, 0, 0),
 			.pEngineName = "Albedo",
 			.engineVersion = VK_MAKE_VERSION(1, 0, 0),
-			.apiVersion = VK_API_VERSION_1_0,
+			.apiVersion = VK_API_VERSION_1_3,
 		};
 
 		VkInstanceCreateInfo instanceCreateInfo{};
@@ -144,7 +158,7 @@ namespace RHI
 
 		instanceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
 		instanceCreateInfo.ppEnabledExtensionNames = extensions.data();
-
+		
 		auto messengerCreateInfo = VulkanContext::GetDefaultDebuggerMessengerCreateInfo();
 		if (EnableValidationLayers)
 		{
@@ -252,7 +266,7 @@ namespace RHI
 			.ppEnabledExtensionNames = m_device_extensions.data(),
 			.pEnabledFeatures = &m_physical_device_features
 		};
-
+		
 		if (vkCreateDevice(m_physical_device, &deviceCreateInfo, m_memory_allocation_callback, &m_device) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the logical device!");
 	}
@@ -472,7 +486,10 @@ namespace RHI
 		vkEnumerateDeviceExtensionProperties(m_physical_device, nullptr, &extensionCount, availableExtensions.data());
 		std::unordered_set<std::string> requiredExtensions(m_device_extensions.begin(), m_device_extensions.end());
 		for (const auto& extension : availableExtensions)
+		{
+			//log::info(">> {}", extension.extensionName);
 			requiredExtensions.erase(extension.extensionName);
+		}
 
 		return requiredExtensions.empty();
 	}
@@ -520,6 +537,30 @@ namespace RHI
 				return true;
 		}
 		return false;
+	}
+
+	std::shared_ptr<CommandPool> VulkanContext::
+		CreateCommandPool(uint32_t submit_queue_family_index,VkCommandPoolCreateFlags command_pool_flags)
+	{
+		return std::make_shared<CommandPool>(shared_from_this(), submit_queue_family_index, command_pool_flags);
+	}
+
+	std::shared_ptr<FramebufferPool> VulkanContext::
+		CreateFramebufferPool()
+	{
+		return std::make_shared<FramebufferPool>(shared_from_this());
+	}
+
+	std::unique_ptr<Semaphore> VulkanContext::
+		CreateSemaphore(VkSemaphoreCreateFlags flags)
+	{
+		return std::make_unique<Semaphore>(shared_from_this(), flags);
+	}
+
+	std::unique_ptr<Fence> VulkanContext::
+		CreateFence(VkFenceCreateFlags flags)
+	{
+		return std::make_unique<Fence>(shared_from_this(), flags);
 	}
 
 }} // namespace Albedo::RHI

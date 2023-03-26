@@ -1,75 +1,118 @@
 #pragma once
 
-#include "vulkan_context.h"
-
 #include <fstream>
 
 namespace Albedo {
 namespace RHI
 {
+	class VulkanContext;
+
 	// Wrapper List
 	class RenderPass;
 	class GraphicsPipeline;
 
-	class CommandPool;		// Factory // Nested Class: CommandPool::CommandBuffer;
+	class CommandPool;		// Factory
+	class CommandBuffer;	// Base Class
+	class CommandBufferReset;
+	class CommandBufferOneTime;
+
 	class FramebufferPool;	// Factory
 
 	class Semaphore;				// Add order between queue operations (same queue or different queues) on the GPU
 	class Fence;						// order the execution on the CPU
 
 	// Implementation
-	class CommandPool
+	class CommandPool : public std::enable_shared_from_this<CommandPool>
 	{
+		friend class CommandBufferReset;
+		friend class CommandBufferOneTime;
 	public:
-		using CommandBufferToken = size_t;
-		friend class CommandBuffer;
-		class CommandBuffer
-		{
-		public:
-			void Begin(VkCommandBufferUsageFlags usage_flags, VkCommandBufferResetFlags reset_flags, const VkCommandBufferInheritanceInfo* inheritanceInfo = nullptr);
-			void End();
-			void Submit(uint32_t target_queue_index, VkFence fence,
-				VkPipelineStageFlags which_pipeline_stages_to_wait,
-				std::vector<VkSemaphore> wait_semaphores, 
-				std::vector<VkSemaphore> signal_semaphores);
-
-			bool IsRecording() const { return m_is_recording; }
-			VkCommandBufferLevel GetLevel() const { return m_level; }
-			operator VkCommandBuffer() { return m_command_buffer; }
-
-		public:
-			CommandBuffer() = delete;
-			CommandBuffer(CommandPool* command_pool, VkCommandBufferLevel level);
-
-		private:
-			CommandPool* const m_parent;
-			VkCommandBuffer m_command_buffer = VK_NULL_HANDLE;
-			VkCommandBufferLevel m_level;
-			bool m_is_recording = false;
-		}; // class CommandBuffer
-
-	public:
-		CommandBufferToken	AllocateCommandBuffer(VkCommandBufferLevel level);
-		CommandBuffer&			GetCommandBuffer(CommandBufferToken token) { return m_command_buffers[token]; }
-
-		size_t size() const { return m_command_buffers.size(); }
-
+		std::shared_ptr<CommandBuffer> AllocateCommandBuffer(VkCommandBufferLevel level);
 		operator VkCommandPool() { return m_command_pool; }
-		CommandBuffer& operator[](CommandBufferToken token) { return m_command_buffers[token]; }
 
 	public:
 		CommandPool() = delete;
 		CommandPool(std::shared_ptr<VulkanContext> vulkan_context,
-									uint32_t target_queue_family,
+									uint32_t submit_queue_family_index,
 									VkCommandPoolCreateFlags command_pool_flags);
-		~CommandPool() { vkDestroyCommandPool(m_context->m_device, m_command_pool, m_context->m_memory_allocation_callback); }
+		~CommandPool();
 
 	private:
 		std::shared_ptr<VulkanContext> m_context;
-		uint32_t m_target_queue_family;
+		VkQueue m_submit_queue_family;
 
 		VkCommandPool m_command_pool = VK_NULL_HANDLE;
-		std::vector<CommandBuffer> m_command_buffers;
+		VkCommandPoolCreateFlags m_command_pool_flags;
+	};
+
+	class CommandBuffer
+	{
+		friend class CommandPool;
+	public:
+		virtual void Begin(VkCommandBufferInheritanceInfo* inheritanceInfo = nullptr) = 0;
+		virtual void End() = 0;
+		virtual void Submit(bool wait_queue_idle = false,
+			VkFence fence = VK_NULL_HANDLE,
+			std::vector<VkSemaphore> wait_semaphores = {},
+			std::vector<VkSemaphore> signal_semaphores = {},
+			VkPipelineStageFlags which_pipeline_stages_to_wait = 0,
+			uint32_t target_queue_index = 0) = 0;
+
+		VkCommandBufferLevel GetLevel() const { return m_level; }
+		bool IsRecording() const { return m_is_recording; }
+		operator VkCommandBuffer() { return m_command_buffer; }
+
+	public:
+		CommandBuffer() = delete;
+		CommandBuffer(std::shared_ptr<CommandPool> parent, VkCommandBufferLevel level);
+		virtual ~CommandBuffer() {};
+
+	protected:
+		std::shared_ptr<CommandPool> m_parent;
+		VkCommandBuffer m_command_buffer = VK_NULL_HANDLE;
+		VkCommandBufferLevel m_level;
+		bool m_is_recording = false;
+
+	}; // class CommandBuffer
+
+	class CommandBufferReset :
+		public CommandBuffer
+	{
+	public:
+		virtual void Begin(VkCommandBufferInheritanceInfo* inheritanceInfo = nullptr) override;
+		virtual void End() override;
+		virtual void Submit(bool wait_queue_idle = false,
+			VkFence fence = VK_NULL_HANDLE,
+			std::vector<VkSemaphore> wait_semaphores = {},
+			std::vector<VkSemaphore> signal_semaphores = {},
+			VkPipelineStageFlags which_pipeline_stages_to_wait = 0,
+			uint32_t target_queue_index = 0) override;
+
+	public:
+		CommandBufferReset() = delete;
+		CommandBufferReset(std::shared_ptr<CommandPool> parent, VkCommandBufferLevel level) :
+			CommandBuffer{ parent, level } {}
+		virtual ~CommandBufferReset() override {};
+	};
+
+	class CommandBufferOneTime :
+		public CommandBuffer
+	{
+	public:
+		virtual void Begin(VkCommandBufferInheritanceInfo* inheritanceInfo = nullptr) override;
+		virtual void End() override;
+		virtual void Submit(bool wait_queue_idle = false,
+			VkFence fence = VK_NULL_HANDLE,
+			std::vector<VkSemaphore> wait_semaphores = {},
+			std::vector<VkSemaphore> signal_semaphores = {},
+			VkPipelineStageFlags which_pipeline_stages_to_wait = 0,
+			uint32_t target_queue_index = 0) override;
+
+	public:
+		CommandBufferOneTime() = delete;
+		CommandBufferOneTime(std::shared_ptr<CommandPool> parent, VkCommandBufferLevel level) :
+			CommandBuffer{ parent, level } {}
+		virtual ~CommandBufferOneTime() override {};
 	};
 
 	class FramebufferPool
@@ -79,20 +122,14 @@ namespace RHI
 		FramebufferToken AllocateFramebuffer(VkFramebufferCreateInfo& create_info);
 		VkFramebuffer& GetFramebuffer(FramebufferToken token) { return m_framebuffers[token]; }
 
-		size_t size() const { return m_framebuffers.size(); }
-		void clear()
-		{
-			if (m_framebuffers.empty()) return;
-			for (auto& frame_buffer : m_framebuffers)
-				vkDestroyFramebuffer(m_context->m_device, frame_buffer, m_context->m_memory_allocation_callback);
-			m_framebuffers.clear();
-		}
+		size_t Size() const { return m_framebuffers.size(); }
+		void Clear();
 		VkFramebuffer& operator[](FramebufferToken token){ return m_framebuffers[token]; }
 
 	public:
 		FramebufferPool() = delete;
 		FramebufferPool(std::shared_ptr<VulkanContext> vulkan_context);
-		~FramebufferPool() { clear(); }
+		~FramebufferPool() { Clear(); }
 
 	private:
 		std::shared_ptr<VulkanContext> m_context;
@@ -105,9 +142,9 @@ namespace RHI
 		// All derived classes have to call initialize() before beginning the render pass.
 		virtual void Initialize();
 
-		virtual void Begin(CommandPool::CommandBuffer& command_buffer, VkFramebuffer& framebuffer);
-		virtual void Render(RHI::CommandPool::CommandBuffer& command_buffer) = 0; // You may call pipelines to Draw() here
-		virtual void End(CommandPool::CommandBuffer& command_buffer);
+		virtual void Begin(std::shared_ptr<CommandBuffer> command_buffer, VkFramebuffer& framebuffer);
+		virtual void Render(std::shared_ptr<RHI::CommandBuffer> command_buffer) = 0; // You may call pipelines to Draw() here
+		virtual void End(std::shared_ptr<CommandBuffer> command_buffer);
 
 		void SetCurrentFrameBufferIndex(size_t index) { m_current_frame_buffer_index = index; }
 		operator VkRenderPass() { return m_render_pass; }
@@ -119,8 +156,8 @@ namespace RHI
 		virtual void create_subpasses() = 0;	
 		virtual void create_pipelines() = 0;
 
-		virtual std::vector<VkClearValue>	set_clear_colors() { return { { { {0.0,0.0,0.0,1.0} } } }; }  // use for VK_ATTACHMENT_LOAD_OP_CLEAR
-		virtual VkRect2D								set_render_area() { return { { 0,0 }, m_context->m_swapchain_current_extent }; }
+		virtual std::vector<VkClearValue>	set_clear_colors(); /* { return { { { {0.0,0.0,0.0,1.0} } } }; }  use for VK_ATTACHMENT_LOAD_OP_CLEAR*/
+		virtual VkRect2D								set_render_area();  /* { return { { 0,0 }, m_context->m_swapchain_current_extent }; }*/
 
 	protected:
 		std::shared_ptr<RHI::VulkanContext> m_context;
@@ -137,10 +174,7 @@ namespace RHI
 	public:
 		RenderPass() = delete;
 		RenderPass(std::shared_ptr<RHI::VulkanContext> vulkan_context);
-		virtual ~RenderPass() noexcept 
-		{ 
-			vkDestroyRenderPass(m_context->m_device, m_render_pass, m_context->m_memory_allocation_callback); 
-		}
+		virtual ~RenderPass() noexcept;
 	};
 
 	class GraphicsPipeline
@@ -149,7 +183,7 @@ namespace RHI
 		// All derived classes have to call initialize() before beginning the render pass.
 		virtual void Initialize();
 
-		virtual void Draw(RHI::CommandPool::CommandBuffer& command_buffer) = 0; // vkCmdDraw ...
+		virtual void Draw(std::shared_ptr<RHI::CommandBuffer> command_buffer) = 0; // vkCmdDraw ...
 
 		VkPipelineLayout GetPipelineLayout() { return m_pipeline_layout; }
 		operator VkPipeline() { return m_pipeline; }
@@ -172,11 +206,7 @@ namespace RHI
 		GraphicsPipeline(std::shared_ptr<RHI::VulkanContext> vulkan_context, 
 										VkRenderPass owner, uint32_t subpass_bind_point, 
 										VkPipeline base_pipeline = VK_NULL_HANDLE, int32_t base_pipeline_index = -1);
-		virtual ~GraphicsPipeline() noexcept
-		{
-			vkDestroyPipelineLayout(m_context->m_device, m_pipeline_layout, m_context->m_memory_allocation_callback);
-			vkDestroyPipeline(m_context->m_device, m_pipeline, m_context->m_memory_allocation_callback);
-		}
+		virtual ~GraphicsPipeline() noexcept;
 
 	protected:
 		VkShaderModule create_shader_module(std::string_view shader_file);
@@ -200,7 +230,7 @@ namespace RHI
 	public:
 		Semaphore() = delete;
 		Semaphore(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkSemaphoreCreateFlags flags);
-		~Semaphore() { log::warn("Del Sema"); vkDestroySemaphore(m_context->m_device, m_semaphore, m_context->m_memory_allocation_callback); }
+		~Semaphore();
 		Semaphore(const Semaphore&) = delete;
 		Semaphore(Semaphore&& rvalue) noexcept;
 		operator VkSemaphore() { return m_semaphore; }
@@ -213,20 +243,12 @@ namespace RHI
 	class Fence
 	{
 	public:
-		void Wait(bool reset = false, uint64_t timeout = std::numeric_limits<uint64_t>::max()) 
-		{ 
-			vkWaitForFences(m_context->m_device, 1, &m_fence, VK_TRUE, timeout); 
-			if (reset) Reset();
-		}
-
-		void Reset()
-		{
-			vkResetFences(m_context->m_device, 1, &m_fence);
-		}
+		void Wait(bool reset = false, uint64_t timeout = std::numeric_limits<uint64_t>::max());
+		void Reset();
 
 		Fence() = delete;
 		Fence(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkFenceCreateFlags flags);
-		~Fence() { log::warn("Del Fen"); vkDestroyFence(m_context->m_device, m_fence, m_context->m_memory_allocation_callback); }
+		~Fence();
 		Fence(const Fence&) = delete;
 		Fence(Fence&& rvalue) noexcept;
 		operator VkFence() { return m_fence; }

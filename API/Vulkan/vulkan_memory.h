@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <memory>
 #include <vector>
 
 // Predeclaration
@@ -22,6 +23,7 @@ namespace RHI
 			friend class VulkanMemoryAllocator;
 		public:
 			void Write(void* data);
+			VkDeviceSize Size();
 
 		public:
 			Buffer() = delete;
@@ -37,9 +39,7 @@ namespace RHI
 
 	public:
 		using BufferToken = size_t;
-		BufferToken CreateBuffer(size_t size, VkBufferUsageFlags usage, VkSharingMode sharing_mode);
-		Buffer& GetBuffer(BufferToken token) 
-		{ assert(token < m_buffers.size() && "Invalid Buffer Token!"); return m_buffers[token]; }
+		std::shared_ptr<Buffer> CreateBuffer(size_t size, VkBufferUsageFlags usage, bool is_exclusive = true, bool is_writable = false, bool is_readable = false);
 
 		~VulkanMemoryAllocator();
 
@@ -55,8 +55,6 @@ namespace RHI
 	private:
 		VulkanContext* const m_context;
 		VmaAllocator m_allocator = VK_NULL_HANDLE;
-
-		std::vector<Buffer> m_buffers;
 	};
 
 	using VMA = VulkanMemoryAllocator;
