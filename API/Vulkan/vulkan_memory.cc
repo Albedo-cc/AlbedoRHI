@@ -35,8 +35,8 @@ namespace RHI
 	}
 
 	std::shared_ptr<VulkanMemoryAllocator::Buffer> VulkanMemoryAllocator::
-		CreateBuffer(size_t size, VkBufferUsageFlags usage, 
-			bool is_exclusive /*= true*/, bool is_writable/* = false*/, bool is_readable/* = false*/)
+		AllocateBuffer(size_t size, VkBufferUsageFlags usage, 
+			bool is_exclusive /*= true*/, bool is_writable/* = false*/, bool is_readable/* = false*/, bool is_persistent/* = false*/)
 		// If both is_writable and is_readable are false, the memory property is Device Local
 	{
 		VkBufferCreateInfo bufferCreateInfo
@@ -48,8 +48,9 @@ namespace RHI
 		};
 
 		VmaAllocationCreateFlags allocation_flags = 0;
-		if (is_writable)	allocation_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-		if (is_readable)	allocation_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+		if (is_writable)		allocation_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+		if (is_readable)		allocation_flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+		if (is_persistent)	allocation_flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
 		VmaAllocationCreateInfo allocationInfo
 		{
 			.flags = allocation_flags,
@@ -78,10 +79,26 @@ namespace RHI
 
 	void VulkanMemoryAllocator::Buffer::Write(void* data)
 	{
+		assert(m_allocation->IsMappingAllowed() && "This buffer is not mapping-allowed!");
+
 		void* mappedArea;
-		vmaMapMemory(m_allocator, m_allocation, &mappedArea);
-		memcpy(mappedArea, data, m_allocation->GetSize());
-		vmaUnmapMemory(m_allocator, m_allocation);
+		if (m_allocation->IsPersistentMap())
+		{
+			mappedArea = m_allocation->GetMappedData();
+			memcpy(mappedArea, data, m_allocation->GetSize());
+		}
+		else
+		{
+			vmaMapMemory(m_allocator, m_allocation, &mappedArea);
+			memcpy(mappedArea, data, m_allocation->GetSize());
+			vmaUnmapMemory(m_allocator, m_allocation);
+		}
+	}
+
+	void* VulkanMemoryAllocator::Buffer::Access()
+	{
+		assert(m_allocation->IsPersistentMap() && "This buffer is not persistently mapped!");
+		return m_allocation->GetMappedData();
 	}
 
 	VkDeviceSize VulkanMemoryAllocator::Buffer::Size()

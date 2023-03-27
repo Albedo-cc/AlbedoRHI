@@ -1,5 +1,7 @@
 #pragma once
 
+#include "vulkan_memory.h"
+
 #include <fstream>
 
 namespace Albedo {
@@ -8,18 +10,20 @@ namespace RHI
 	class VulkanContext;
 
 	// Wrapper List
-	class RenderPass;
-	class GraphicsPipeline;
+	class RenderPass;			// Abstract Class
+	class GraphicsPipeline;	// Abstract Class
 
 	class CommandPool;		// Factory
-	class CommandBuffer;	// Base Class
+	class CommandBuffer;
 	class CommandBufferReset;
 	class CommandBufferOneTime;
 
 	class FramebufferPool;	// Factory
 
-	class Semaphore;				// Add order between queue operations (same queue or different queues) on the GPU
-	class Fence;						// order the execution on the CPU
+	class DescriptorPool;		// Factory
+
+	class Semaphore;	// Add order between queue operations (same queue or different queues) on the GPU
+	class Fence;				// order the execution on the CPU
 
 	// Implementation
 	class CommandPool : public std::enable_shared_from_this<CommandPool>
@@ -190,6 +194,7 @@ namespace RHI
 
 	protected:
 		virtual std::vector<VkPipelineShaderStageCreateInfo>		prepare_shader_stage_state()		= 0; // Helper: create_shader_module()
+		virtual void  																				prepare_descriptor_sets()				= 0; // Create m_descriptor_set_layouts, m_descriptor_pool, and m_descriptor_sets
 		virtual VkPipelineLayoutCreateInfo										prepare_pipeline_layout_state()		= 0;
 
 		virtual VkPipelineVertexInputStateCreateInfo						prepare_vertex_inpute_state()		= 0;
@@ -209,20 +214,46 @@ namespace RHI
 		virtual ~GraphicsPipeline() noexcept;
 
 	protected:
-		VkShaderModule create_shader_module(std::string_view shader_file);
+		VkShaderModule	create_shader_module(std::string_view shader_file);
 
 	protected:
 		std::shared_ptr<RHI::VulkanContext> m_context;
-		VkPipeline					m_pipeline					= VK_NULL_HANDLE; 
-		VkPipelineLayout		m_pipeline_layout	= VK_NULL_HANDLE;
-		VkPipelineCache		m_pipeline_cache		= VK_NULL_HANDLE;
-		VkPipeline					m_base_pipeline;
-		int32_t						m_base_pipeline_index;
+		VkPipeline								m_pipeline								= VK_NULL_HANDLE;
+		VkPipelineLayout					m_pipeline_layout				= VK_NULL_HANDLE;
+		VkPipelineCache					m_pipeline_cache					= VK_NULL_HANDLE;
+		VkPipeline								m_base_pipeline					= VK_NULL_HANDLE;
+		int32_t									m_base_pipeline_index;
 
 		VkRenderPass						m_owner;
 		uint32_t									m_subpass_bind_point;
 		std::vector<VkViewport>		m_viewports;
 		std::vector<VkRect2D>		m_scissors;
+		std::vector<VkDescriptorSetLayout> m_descriptor_set_layouts;
+		std::unique_ptr<DescriptorPool>		 m_descriptor_pool;
+	};
+
+	class DescriptorPool
+	{
+	public:
+		void AllocateDescriptorSets(const std::vector<VkDescriptorSetLayout>& descriptor_set_layouts);
+
+		VkDescriptorSet& GetDescriptorSet(size_t index) { return m_descriptor_sets[index]; }
+		std::vector<VkDescriptorSet>& GetAllDescriptorSets() { return m_descriptor_sets; }
+		VkDescriptorSet& operator[](size_t index) { return m_descriptor_sets[index]; }
+		
+		void WriteBufferSet(size_t target_set_index, VkDescriptorType descriptor_type, uint32_t descriptor_count,
+											uint32_t descriptor_binding, std::shared_ptr<VMA::Buffer> descriptor_buffer, uint32_t offset/* = 0*/);
+		
+	public:
+		DescriptorPool() = delete;
+		DescriptorPool(std::shared_ptr<RHI::VulkanContext> vulkan_context, const std::vector<VkDescriptorPoolSize>& pool_size, uint32_t limit_max_sets);
+		~DescriptorPool();
+		operator VkDescriptorPool() { return m_descriptor_pool; }
+
+	private:
+		std::shared_ptr<RHI::VulkanContext> m_context;
+		VkDescriptorPool	 m_descriptor_pool = VK_NULL_HANDLE;
+		std::vector<VkDescriptorSet> m_descriptor_sets;
 	};
 
 	class Semaphore

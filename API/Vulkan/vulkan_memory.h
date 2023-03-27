@@ -22,7 +22,8 @@ namespace RHI
 		{
 			friend class VulkanMemoryAllocator;
 		public:
-			void Write(void* data);
+			void		Write(void* data);	// The buffer must be mapping-allowed and writable
+			void*	Access();				// If the buffer is persistently mapped, you can access its memory directly
 			VkDeviceSize Size();
 
 		public:
@@ -38,8 +39,8 @@ namespace RHI
 		};
 
 	public:
-		using BufferToken = size_t;
-		std::shared_ptr<Buffer> CreateBuffer(size_t size, VkBufferUsageFlags usage, bool is_exclusive = true, bool is_writable = false, bool is_readable = false);
+		std::shared_ptr<Buffer> AllocateBuffer(size_t size, VkBufferUsageFlags usage, 
+			bool is_exclusive = true, bool is_writable = false, bool is_readable = false, bool is_persistent = false);
 
 		~VulkanMemoryAllocator();
 

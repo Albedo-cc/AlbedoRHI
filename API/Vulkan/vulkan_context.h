@@ -91,9 +91,12 @@ namespace RHI
 
 	public:
 		// Products
+		std::weak_ptr<VulkanContext>			CreateVulkanContextView() { return shared_from_this(); }
+
 		std::shared_ptr<CommandPool>		CreateCommandPool(	uint32_t submit_queue_family_index,
 																												VkCommandPoolCreateFlags command_pool_flags);
 		std::shared_ptr<FramebufferPool>	CreateFramebufferPool();
+		std::unique_ptr<DescriptorPool>		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
 
 		std::unique_ptr<Semaphore>				CreateSemaphore(VkSemaphoreCreateFlags flags);
 		std::unique_ptr<Fence>						CreateFence(VkFenceCreateFlags flags);

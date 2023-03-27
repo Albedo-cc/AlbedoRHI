@@ -95,12 +95,17 @@ namespace RHI
 	{
 		vkDestroyPipelineLayout(m_context->m_device, m_pipeline_layout, m_context->m_memory_allocation_callback);
 		vkDestroyPipeline(m_context->m_device, m_pipeline, m_context->m_memory_allocation_callback);
+		for (auto& descriptor_set_layout : m_descriptor_set_layouts)
+		{
+			vkDestroyDescriptorSetLayout(m_context->m_device, descriptor_set_layout, m_context->m_memory_allocation_callback);
+		}
 	}
 
 	void GraphicsPipeline::Initialize()
 	{
-		auto pipeline_layout_state		= prepare_pipeline_layout_state();
+		prepare_descriptor_sets();
 
+		auto pipeline_layout_state		= prepare_pipeline_layout_state();
 		if (vkCreatePipelineLayout(
 			m_context->m_device,
 			&pipeline_layout_state,
@@ -153,6 +158,7 @@ namespace RHI
 			&m_pipeline) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Graphics Pipeline!");
 
+		// Free Resource
 		for (auto& shader_stage : shader_stage_state)
 		{
 			vkDestroyShaderModule(m_context->m_device, shader_stage.module, m_context->m_memory_allocation_callback);
@@ -390,6 +396,78 @@ namespace RHI
 			throw std::runtime_error("Failed to create the Vulkan Command Buffer!");
 
 		return commandbuffer;
+	}
+
+	DescriptorPool::DescriptorPool(std::shared_ptr<RHI::VulkanContext> vulkan_context, 
+		const std::vector<VkDescriptorPoolSize>& pool_size, uint32_t limit_max_sets) :
+		m_context{ std::move(vulkan_context) }
+	{
+		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.maxSets = limit_max_sets,
+			.poolSizeCount = static_cast<uint32_t>(pool_size.size()),
+			.pPoolSizes = pool_size.data()
+		};
+		if (vkCreateDescriptorPool(
+			m_context->m_device,
+			&descriptorPoolCreateInfo,
+			m_context->m_memory_allocation_callback,
+			&m_descriptor_pool) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create the Vulkan Descriptor Pool!");
+	}
+
+	DescriptorPool::~DescriptorPool()
+	{
+		vkDestroyDescriptorPool(m_context->m_device, m_descriptor_pool, m_context->m_memory_allocation_callback);
+	}
+
+	void DescriptorPool::AllocateDescriptorSets(const std::vector<VkDescriptorSetLayout>& descriptor_set_layouts)
+	{
+		size_t old_size = m_descriptor_sets.size();
+		m_descriptor_sets.resize(old_size + descriptor_set_layouts.size());
+		
+		VkDescriptorSetAllocateInfo descriptorSetAllocateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.descriptorPool = m_descriptor_pool,
+			.descriptorSetCount = static_cast<uint32_t>(m_descriptor_sets.size()),
+			.pSetLayouts = descriptor_set_layouts.data()
+		};
+
+		if (vkAllocateDescriptorSets(
+			m_context->m_device,
+			&descriptorSetAllocateInfo,
+			m_descriptor_sets.data() + old_size) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create the Vulkan Descriptor Sets!");
+	}
+
+	void DescriptorPool::
+		WriteBufferSet(size_t target_set_index, VkDescriptorType descriptor_type, uint32_t descriptor_count,
+		uint32_t descriptor_binding, std::shared_ptr<VMA::Buffer> descriptor_buffer, uint32_t offset/* = 0*/)
+	{
+		assert(target_set_index < m_descriptor_sets.size() && "Invalid descriptor set index!");
+		VkDescriptorBufferInfo descriptorBufferInfo
+		{
+			.buffer = *descriptor_buffer,
+			.offset = 0,
+			.range = descriptor_buffer->Size()
+		};
+
+		VkWriteDescriptorSet writeDescriptorSet
+		{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = m_descriptor_sets[target_set_index],
+			.dstBinding = descriptor_binding,
+			.dstArrayElement = offset,
+			.descriptorCount = descriptor_count,
+			.descriptorType = descriptor_type,
+			.pImageInfo = nullptr,
+			.pBufferInfo = &descriptorBufferInfo,
+			.pTexelBufferView = nullptr
+		};
+
+		vkUpdateDescriptorSets(m_context->m_device, 1, &writeDescriptorSet, 0, nullptr);
 	}
 
 	Semaphore::Semaphore(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkSemaphoreCreateFlags flags) :

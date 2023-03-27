@@ -1,5 +1,4 @@
 #include "vulkan_context.h"
-#include "vulkan_wrapper.h"
 
 namespace Albedo {
 namespace RHI
@@ -549,6 +548,12 @@ namespace RHI
 		CreateFramebufferPool()
 	{
 		return std::make_shared<FramebufferPool>(shared_from_this());
+	}
+
+	std::unique_ptr<DescriptorPool> VulkanContext::
+		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets)
+	{
+		return std::make_unique<DescriptorPool>(shared_from_this(), pool_size, limit_max_sets);
 	}
 
 	std::unique_ptr<Semaphore> VulkanContext::
