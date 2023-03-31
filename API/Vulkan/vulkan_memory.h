@@ -13,11 +13,13 @@ namespace RHI
 {
 	class VulkanContext;
 
-	// [Alias: using VMA = VulkanMemoryAllocator]
-	class VulkanMemoryAllocator
+	class VulkanMemoryAllocator : public std::enable_shared_from_this<VulkanMemoryAllocator>
 	{
 		friend class VulkanContext;
+		friend class Buffer;
+		friend class Image;
 	public:
+		// Buffer
 		class Buffer
 		{
 			friend class VulkanMemoryAllocator;
@@ -28,19 +30,54 @@ namespace RHI
 
 		public:
 			Buffer() = delete;
-			Buffer(VmaAllocator& allocator) : m_allocator{ allocator } {};
+			Buffer(std::shared_ptr<VulkanMemoryAllocator> parent) : m_parent{ std::move(parent)} {};
 			~Buffer();
 			operator VkBuffer() { return m_buffer; }
 
 		private:
-			VmaAllocator& m_allocator;
+			std::shared_ptr<VulkanMemoryAllocator> m_parent;
 			VmaAllocation m_allocation = VK_NULL_HANDLE;
 			VkBuffer m_buffer = VK_NULL_HANDLE;
+		};
+
+		// Image
+		class Image
+		{
+			friend class VulkanMemoryAllocator;
+		public:
+			void Write(void* data);
+
+			void TransitionImageLayout(VkImageLayout target_layout);
+			VkImageView& GetImageView() { return m_image_view; }
+			VkDeviceSize Size();
+
+		public:
+			Image() = delete;
+			Image(std::shared_ptr<VulkanMemoryAllocator> parent) : m_parent{ std::move(parent) } {};
+			~Image();
+			operator VkImage() { return m_image; }
+		
+		private:
+			std::shared_ptr<VulkanMemoryAllocator> m_parent;
+			VmaAllocation m_allocation = VK_NULL_HANDLE;
+			VkImage m_image = VK_NULL_HANDLE;
+			VkImageView m_image_view = VK_NULL_HANDLE;
+
+			VkImageLayout m_image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+			VkFormat m_image_format;
+			uint32_t m_image_width;
+			uint32_t m_image_height;
+			uint32_t m_image_channel;
+			uint32_t m_mipmap_level;
 		};
 
 	public:
 		std::shared_ptr<Buffer> AllocateBuffer(size_t size, VkBufferUsageFlags usage, 
 			bool is_exclusive = true, bool is_writable = false, bool is_readable = false, bool is_persistent = false);
+		std::shared_ptr<Image> AllocateImage(uint32_t width, uint32_t height, uint32_t channel, 
+			VkFormat format, VkImageUsageFlags usage, 
+			VkImageTiling tiling_mode = VK_IMAGE_TILING_OPTIMAL,
+			uint32_t miplevel = 1);
 
 		~VulkanMemoryAllocator();
 
@@ -49,7 +86,7 @@ namespace RHI
 		{
 			struct VMACreator :public VulkanMemoryAllocator 
 			{ VMACreator(VulkanContext* vulkan_context) : VulkanMemoryAllocator{ vulkan_context } {}};
-			return std::make_unique<VMACreator>(vulkan_context);
+			return std::make_shared<VMACreator>(vulkan_context);
 		}
 		VulkanMemoryAllocator(VulkanContext* vulkan_context);
 
@@ -57,7 +94,6 @@ namespace RHI
 		VulkanContext* const m_context;
 		VmaAllocator m_allocator = VK_NULL_HANDLE;
 	};
-
 	using VMA = VulkanMemoryAllocator;
 
 }} // namespace Albedo::RHI

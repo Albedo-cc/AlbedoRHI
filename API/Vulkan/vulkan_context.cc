@@ -3,7 +3,7 @@
 namespace Albedo {
 namespace RHI
 {
-	std::vector<uint32_t> VulkanContext::s_debug_message_statistics(4, 0);
+	std::vector<uint32_t> VulkanContext::s_debug_message_statistics(MAX_MESSAGE_TYPE, 0);
 
 	VulkanContext::VulkanContext(GLFWwindow* window) :
 		m_window{ window }
@@ -22,6 +22,8 @@ namespace RHI
 
 	VulkanContext::~VulkanContext()
 	{
+		m_memory_allocator.reset();
+
 		destroy_swap_chain();
 		destroy_logical_device();
 		destroy_surface();
@@ -383,11 +385,13 @@ namespace RHI
 
 	void VulkanContext::destroy_debug_messenger()
 	{
+		if (!EnableValidationLayers) return;
+
 		log::warn("\n[Vulkan Messenger Statistics]");
 		log::info("VERBOSE: {}", s_debug_message_statistics[VERBOSE]);
 		log::info("INFO: {}", s_debug_message_statistics[INFO]);
 		log::info("WARN: {}", s_debug_message_statistics[WARN]);
-		log::info("ERROR: {}\n", s_debug_message_statistics[ERROR]);
+		log::info("ERROR: {}", s_debug_message_statistics[ERROR]);
 		auto loadFunction = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(m_instance, "vkDestroyDebugUtilsMessengerEXT");
 		if (loadFunction != nullptr) loadFunction(m_instance, m_debug_messenger, m_memory_allocation_callback);
 		else throw std::runtime_error("Failed to load function: vkDestroyDebugUtilsMessengerEXT");
@@ -550,10 +554,10 @@ namespace RHI
 		return std::make_shared<FramebufferPool>(shared_from_this());
 	}
 
-	std::unique_ptr<DescriptorPool> VulkanContext::
+	std::shared_ptr<DescriptorPool> VulkanContext::
 		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets)
 	{
-		return std::make_unique<DescriptorPool>(shared_from_this(), pool_size, limit_max_sets);
+		return std::make_shared<DescriptorPool>(shared_from_this(), pool_size, limit_max_sets);
 	}
 
 	std::unique_ptr<Semaphore> VulkanContext::

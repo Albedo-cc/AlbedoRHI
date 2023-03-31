@@ -95,26 +95,43 @@ namespace RHI
 	{
 		vkDestroyPipelineLayout(m_context->m_device, m_pipeline_layout, m_context->m_memory_allocation_callback);
 		vkDestroyPipeline(m_context->m_device, m_pipeline, m_context->m_memory_allocation_callback);
-		for (auto& descriptor_set_layout : m_descriptor_set_layouts)
-		{
-			vkDestroyDescriptorSetLayout(m_context->m_device, descriptor_set_layout, m_context->m_memory_allocation_callback);
-		}
 	}
 
 	void GraphicsPipeline::Initialize()
 	{
-		prepare_descriptor_sets();
+		// --------------------------------------------------------------------------------------------------------------------------------//
+		// 1. Create Pipeline Layout
+		// --------------------------------------------------------------------------------------------------------------------------------//
+		// Descriptor Set Layouts
+		auto descriptor_set_layouts = prepare_descriptor_layouts();
 
-		auto pipeline_layout_state		= prepare_pipeline_layout_state();
+		// Push Constants
+		auto push_constant_state  = prepare_push_constant_state();
+
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast<uint32_t>(descriptor_set_layouts.size()),
+			.pSetLayouts = descriptor_set_layouts.data(),
+			.pushConstantRangeCount = static_cast<uint32_t>(push_constant_state.size()),
+			.pPushConstantRanges = push_constant_state.data()
+		};
+
 		if (vkCreatePipelineLayout(
 			m_context->m_device,
-			&pipeline_layout_state,
+			&pipelineLayoutCreateInfo,
 			m_context->m_memory_allocation_callback,
 			&m_pipeline_layout) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Pipeline Layout!");
+		// --------------------------------------------------------------------------------------------------------------------------------//
 
+
+
+		// --------------------------------------------------------------------------------------------------------------------------------//
+		// 2. Create Graphics Pipeline
+		// --------------------------------------------------------------------------------------------------------------------------------//
 		auto shader_stage_state		= prepare_shader_stage_state();
-		auto vertex_inpute_state			= prepare_vertex_inpute_state();
+		auto vertex_inpute_state			= prepare_vertex_input_state();
 		auto input_assembly_state		= prepare_input_assembly_state();
 		auto viewport_state					= prepare_viewport_state();
 		auto rasterization_state			= prepare_rasterization_state();
@@ -157,12 +174,20 @@ namespace RHI
 			m_context->m_memory_allocation_callback,
 			&m_pipeline) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Graphics Pipeline!");
+		// --------------------------------------------------------------------------------------------------------------------------------//
 
-		// Free Resource
+
+
+		// --------------------------------------------------------------------------------------------------------------------------------//
+		// 3. Free Resource
+		// --------------------------------------------------------------------------------------------------------------------------------//
+		// Shader Modules
 		for (auto& shader_stage : shader_stage_state)
 		{
-			vkDestroyShaderModule(m_context->m_device, shader_stage.module, m_context->m_memory_allocation_callback);
+			vkDestroyShaderModule(m_context->m_device, shader_stage.module, 
+														 m_context->m_memory_allocation_callback);
 		}
+		// --------------------------------------------------------------------------------------------------------------------------------//
 	}
 
 	VkShaderModule GraphicsPipeline::create_shader_module(std::string_view shader_file)
@@ -422,52 +447,68 @@ namespace RHI
 		vkDestroyDescriptorPool(m_context->m_device, m_descriptor_pool, m_context->m_memory_allocation_callback);
 	}
 
-	void DescriptorPool::AllocateDescriptorSets(const std::vector<VkDescriptorSetLayout>& descriptor_set_layouts)
+	std::shared_ptr<DescriptorSet> DescriptorPool::AllocateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings)
 	{
-		size_t old_size = m_descriptor_sets.size();
-		m_descriptor_sets.resize(old_size + descriptor_set_layouts.size());
+		auto descriptor_set = std::make_shared<DescriptorSet>(shared_from_this());
+
+		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = static_cast<uint32_t>(descriptor_bindings.size()),
+			.pBindings = descriptor_bindings.data()
+		};
+		if (vkCreateDescriptorSetLayout(
+			m_context->m_device,
+			&descriptorSetLayoutCreateInfo,
+			m_context->m_memory_allocation_callback,
+			&(descriptor_set->descriptor_set_layout)) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create the Vulkan Descriptor Set Layout!");
 		
 		VkDescriptorSetAllocateInfo descriptorSetAllocateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 			.descriptorPool = m_descriptor_pool,
-			.descriptorSetCount = static_cast<uint32_t>(m_descriptor_sets.size()),
-			.pSetLayouts = descriptor_set_layouts.data()
+			.descriptorSetCount = 1,
+			.pSetLayouts = &(descriptor_set->descriptor_set_layout)
 		};
 
 		if (vkAllocateDescriptorSets(
 			m_context->m_device,
 			&descriptorSetAllocateInfo,
-			m_descriptor_sets.data() + old_size) != VK_SUCCESS)
+			&(descriptor_set->m_descriptor_set)) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Descriptor Sets!");
+
+		return descriptor_set;
 	}
 
-	void DescriptorPool::
-		WriteBufferSet(size_t target_set_index, VkDescriptorType descriptor_type, uint32_t descriptor_count,
-		uint32_t descriptor_binding, std::shared_ptr<VMA::Buffer> descriptor_buffer, uint32_t offset/* = 0*/)
+	DescriptorSet::~DescriptorSet()
 	{
-		assert(target_set_index < m_descriptor_sets.size() && "Invalid descriptor set index!");
+		vkDestroyDescriptorSetLayout(m_parent->m_context->m_device, descriptor_set_layout, m_parent->m_context->m_memory_allocation_callback);
+	}
+
+	void DescriptorSet::WriteBuffer(VkDescriptorType buffer_type, uint32_t buffer_binding, std::shared_ptr<VMA::Buffer> data)
+	{
 		VkDescriptorBufferInfo descriptorBufferInfo
 		{
-			.buffer = *descriptor_buffer,
+			.buffer = *data,
 			.offset = 0,
-			.range = descriptor_buffer->Size()
+			.range = data->Size()
 		};
 
 		VkWriteDescriptorSet writeDescriptorSet
 		{
 			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.dstSet = m_descriptor_sets[target_set_index],
-			.dstBinding = descriptor_binding,
-			.dstArrayElement = offset,
-			.descriptorCount = descriptor_count,
-			.descriptorType = descriptor_type,
+			.dstSet = m_descriptor_set,
+			.dstBinding = buffer_binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = buffer_type,
 			.pImageInfo = nullptr,
 			.pBufferInfo = &descriptorBufferInfo,
 			.pTexelBufferView = nullptr
 		};
 
-		vkUpdateDescriptorSets(m_context->m_device, 1, &writeDescriptorSet, 0, nullptr);
+		vkUpdateDescriptorSets(m_parent->m_context->m_device, 1, &writeDescriptorSet, 0, nullptr);
 	}
 
 	Semaphore::Semaphore(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkSemaphoreCreateFlags flags) :

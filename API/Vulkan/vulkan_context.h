@@ -46,7 +46,7 @@ namespace RHI
 		std::optional<uint32_t>			m_device_queue_transfer;
 		std::optional<uint32_t>			m_device_queue_sparsebinding;
 
-		std::unique_ptr<VMA>				m_memory_allocator;
+		std::shared_ptr<VMA>				m_memory_allocator;
 		VkAllocationCallbacks*			m_memory_allocation_callback = VK_NULL_HANDLE;
 
 		VkSwapchainKHR					m_swapchain								= VK_NULL_HANDLE;
@@ -71,10 +71,17 @@ namespace RHI
 		std::vector<VkPresentModeKHR> m_surface_present_modes;
 		std::vector<VkSurfaceFormatKHR> m_surface_formats; // 1.VK_FORMAT_X 2. VK_COLOR_SPACE_X
 		
-		std::vector<const char*>			m_validation_layers{	"VK_LAYER_KHRONOS_validation",
-																									"VK_LAYER_RENDERDOC_Capture"};
+#ifdef NDEBUG
+		std::vector<const char*>			m_validation_layers{"VK_LAYER_RENDERDOC_Capture"};
+
+		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+#else
+		std::vector<const char*>			m_validation_layers{ "VK_LAYER_KHRONOS_validation",
+																								 "VK_LAYER_RENDERDOC_Capture" };
+
 		std::vector<const char*>			m_device_extensions{ VK_EXT_DEBUG_MARKER_EXTENSION_NAME,
 																									 VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+#endif	
 
 	public:
 		void WaitDeviceIdle() { vkDeviceWaitIdle(m_device); }		
@@ -96,7 +103,7 @@ namespace RHI
 		std::shared_ptr<CommandPool>		CreateCommandPool(	uint32_t submit_queue_family_index,
 																												VkCommandPoolCreateFlags command_pool_flags);
 		std::shared_ptr<FramebufferPool>	CreateFramebufferPool();
-		std::unique_ptr<DescriptorPool>		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
+		std::shared_ptr<DescriptorPool>		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
 
 		std::unique_ptr<Semaphore>				CreateSemaphore(VkSemaphoreCreateFlags flags);
 		std::unique_ptr<Fence>						CreateFence(VkFenceCreateFlags flags);
@@ -136,7 +143,7 @@ namespace RHI
 
 	private: 
 		// Debug Messenger
-		enum vulkan_message_type { VERBOSE, INFO, WARN, ERROR };
+		enum vulkan_message_type { VERBOSE, INFO, WARN, ERROR, MAX_MESSAGE_TYPE };
 		static std::vector<uint32_t> s_debug_message_statistics;
 
 		static auto GetDefaultDebuggerMessengerCreateInfo()

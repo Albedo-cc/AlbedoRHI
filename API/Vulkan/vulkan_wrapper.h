@@ -13,14 +13,15 @@ namespace RHI
 	class RenderPass;			// Abstract Class
 	class GraphicsPipeline;	// Abstract Class
 
+	class FramebufferPool;	// Factory
+
 	class CommandPool;		// Factory
 	class CommandBuffer;
 	class CommandBufferReset;
 	class CommandBufferOneTime;
 
-	class FramebufferPool;	// Factory
-
 	class DescriptorPool;		// Factory
+	class DescriptorSet;
 
 	class Semaphore;	// Add order between queue operations (same queue or different queues) on the GPU
 	class Fence;				// order the execution on the CPU
@@ -193,11 +194,11 @@ namespace RHI
 		operator VkPipeline() { return m_pipeline; }
 
 	protected:
-		virtual std::vector<VkPipelineShaderStageCreateInfo>		prepare_shader_stage_state()		= 0; // Helper: create_shader_module()
-		virtual void  																				prepare_descriptor_sets()				= 0; // Create m_descriptor_set_layouts, m_descriptor_pool, and m_descriptor_sets
-		virtual VkPipelineLayoutCreateInfo										prepare_pipeline_layout_state()		= 0;
+		virtual std::vector<VkDescriptorSetLayout>  						prepare_descriptor_layouts()			= 0; // Desciptor Pool
+		virtual std::vector<VkPushConstantRange>						prepare_push_constant_state()		= 0;
 
-		virtual VkPipelineVertexInputStateCreateInfo						prepare_vertex_inpute_state()		= 0;
+		virtual std::vector<VkPipelineShaderStageCreateInfo>		prepare_shader_stage_state()		= 0; // Helper: create_shader_module()
+		virtual VkPipelineVertexInputStateCreateInfo						prepare_vertex_input_state()			= 0;
 		virtual VkPipelineInputAssemblyStateCreateInfo				prepare_input_assembly_state()	= 0;
 		virtual VkPipelineViewportStateCreateInfo							prepare_viewport_state()				= 0; // m_viewports & m_scissors
 		virtual VkPipelineRasterizationStateCreateInfo					prepare_rasterization_state()			= 0;
@@ -229,20 +230,33 @@ namespace RHI
 		std::vector<VkViewport>		m_viewports;
 		std::vector<VkRect2D>		m_scissors;
 		std::vector<VkDescriptorSetLayout> m_descriptor_set_layouts;
-		std::unique_ptr<DescriptorPool>		 m_descriptor_pool;
 	};
 
-	class DescriptorPool
+	class DescriptorSet
 	{
+		friend class DescriptorPool;
 	public:
-		void AllocateDescriptorSets(const std::vector<VkDescriptorSetLayout>& descriptor_set_layouts);
+		void WriteBuffer(VkDescriptorType buffer_type, uint32_t buffer_binding, std::shared_ptr<VMA::Buffer> data);
 
-		VkDescriptorSet& GetDescriptorSet(size_t index) { return m_descriptor_sets[index]; }
-		std::vector<VkDescriptorSet>& GetAllDescriptorSets() { return m_descriptor_sets; }
-		VkDescriptorSet& operator[](size_t index) { return m_descriptor_sets[index]; }
-		
-		void WriteBufferSet(size_t target_set_index, VkDescriptorType descriptor_type, uint32_t descriptor_count,
-											uint32_t descriptor_binding, std::shared_ptr<VMA::Buffer> descriptor_buffer, uint32_t offset/* = 0*/);
+		VkDescriptorSetLayout& GetDescriptorSetLayout() { return descriptor_set_layout; }
+
+	public:
+		DescriptorSet() = delete;
+		DescriptorSet(std::shared_ptr<DescriptorPool> parent) :m_parent{ std::move(parent) } {}
+		~DescriptorSet();
+		operator VkDescriptorSet() { return m_descriptor_set; }
+
+	private:
+		std::shared_ptr<DescriptorPool> m_parent;
+		VkDescriptorSet m_descriptor_set = VK_NULL_HANDLE;
+		VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
+	};
+
+	class DescriptorPool : public std::enable_shared_from_this<DescriptorPool>
+	{
+		friend class DescriptorSet;
+	public:
+		std::shared_ptr<DescriptorSet> AllocateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings);
 		
 	public:
 		DescriptorPool() = delete;
@@ -253,7 +267,6 @@ namespace RHI
 	private:
 		std::shared_ptr<RHI::VulkanContext> m_context;
 		VkDescriptorPool	 m_descriptor_pool = VK_NULL_HANDLE;
-		std::vector<VkDescriptorSet> m_descriptor_sets;
 	};
 
 	class Semaphore
