@@ -230,6 +230,7 @@ namespace RHI
 			throw std::runtime_error("Failed to find a suitable GPU!");
 
 		vkGetPhysicalDeviceFeatures(m_physical_device, &m_physical_device_features);
+		vkGetPhysicalDeviceProperties(m_physical_device, &m_physical_device_properties);
 		vkGetPhysicalDeviceMemoryProperties(m_physical_device, &m_physical_device_memory_properties);
 	}
 
@@ -414,7 +415,7 @@ namespace RHI
 		vkGetPhysicalDeviceProperties(m_physical_device, &phyDevProperties);
 		vkGetPhysicalDeviceFeatures(m_physical_device, &phyDevFeatures);
 
-		//if (!phyDevFeatures.samplerAnisotropy) return false;
+		if (!phyDevFeatures.samplerAnisotropy) return false;
 
 		/*if(phyDevProperties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ||
 			phyDevFeatures.geometryShader != VK_TRUE)
@@ -558,6 +559,15 @@ namespace RHI
 		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets)
 	{
 		return std::make_shared<DescriptorPool>(shared_from_this(), pool_size, limit_max_sets);
+	}
+
+	std::shared_ptr<Sampler> VulkanContext::
+		CreateSampler(VkSamplerAddressMode address_mode,
+		VkBorderColor border_color/* = VK_BORDER_COLOR_INT_OPAQUE_BLACK*/,
+		VkCompareOp compare_mode/* = VK_COMPARE_OP_NEVER*/,
+		bool anisotropy_enable/* = true*/)
+	{
+		return std::make_shared<Sampler>(shared_from_this(), address_mode, border_color, compare_mode, anisotropy_enable);
 	}
 
 	std::unique_ptr<Semaphore> VulkanContext::

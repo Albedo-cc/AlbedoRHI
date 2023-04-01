@@ -511,6 +511,81 @@ namespace RHI
 		vkUpdateDescriptorSets(m_parent->m_context->m_device, 1, &writeDescriptorSet, 0, nullptr);
 	}
 
+	void DescriptorSet::WriteImage(VkDescriptorType image_type, uint32_t image_binding, std::shared_ptr<VMA::Image> data)
+	{
+		assert(data->GetImageSampler() != VK_NULL_HANDLE && "Cannot write the image without a sampler!");
+		VkDescriptorImageInfo descriptorImageInfo
+		{
+			.sampler = data->GetImageSampler(),
+			.imageView = data->GetImageView(),
+			.imageLayout = data->GetImageLayout()
+		};
+
+		VkWriteDescriptorSet writeDescriptorSet
+		{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = m_descriptor_set,
+			.dstBinding = image_binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = image_type,
+			.pImageInfo = &descriptorImageInfo,
+			.pBufferInfo = nullptr,
+			.pTexelBufferView = nullptr
+		};
+
+		vkUpdateDescriptorSets(m_parent->m_context->m_device, 1, &writeDescriptorSet, 0, nullptr);
+	}
+
+	Sampler::Sampler(std::shared_ptr<RHI::VulkanContext> vulkan_context,
+		VkSamplerAddressMode address_mode,
+		VkBorderColor border_color/* = VK_BORDER_COLOR_INT_OPAQUE_BLACK*/,
+		VkCompareOp compare_mode/* = VK_COMPARE_OP_NEVER*/,
+		bool anisotropy_enable/* = true*/):
+		m_context {std::move(vulkan_context)}
+	{
+		VkSamplerCreateInfo samplerCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+
+			.magFilter = VK_FILTER_LINEAR,
+			.minFilter = VK_FILTER_LINEAR,
+
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+
+			.addressModeU = address_mode,
+			.addressModeV = address_mode,
+			.addressModeW = address_mode,
+
+			.mipLodBias = 0.0,
+
+			.anisotropyEnable = anisotropy_enable ? VK_TRUE : VK_FALSE,
+			.maxAnisotropy = m_context->m_physical_device_properties.limits.maxSamplerAnisotropy,
+
+			.compareEnable = compare_mode ? VK_TRUE : VK_FALSE,
+			.compareOp = compare_mode,
+			
+			.minLod = 0.0,
+			.maxLod = 0.0,
+
+			.borderColor = border_color,
+
+			.unnormalizedCoordinates = VK_FALSE
+		};
+
+		if (vkCreateSampler(
+			m_context->m_device,
+			&samplerCreateInfo,
+			m_context->m_memory_allocation_callback,
+			&m_sampler) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create the Vulkan Sampler!");
+	}
+
+	Sampler::~Sampler()
+	{
+		vkDestroySampler(m_context->m_device, m_sampler, m_context->m_memory_allocation_callback);
+	}
+
 	Semaphore::Semaphore(std::shared_ptr<RHI::VulkanContext> vulkan_context, VkSemaphoreCreateFlags flags) :
 		m_context{ std::move(vulkan_context) }
 	{

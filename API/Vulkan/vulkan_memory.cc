@@ -124,21 +124,19 @@ namespace RHI
 			.arrayLayers = 1,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.tiling = tiling_mode, // P206
-			.usage = usage,
+			.usage = usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE, // The image will only be used by one queue family: the one that supports graphics (and therefore also) transfer operations.
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED // P207 Top
 		};
 
-		VmaAllocationCreateFlags allocation_flags = 0;
 		VmaAllocationCreateInfo allocationInfo
 		{
-			.flags = allocation_flags,
+			.flags = 0x0,
 			.usage = VMA_MEMORY_USAGE_AUTO,
-			//.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+			.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
 		};
 
 		auto image = std::make_shared<VMA::Image>(shared_from_this());
-
 		if (vmaCreateImage(
 			m_allocator,
 			&imageCreateInfo,
@@ -184,19 +182,22 @@ namespace RHI
 	VMA::Image::~Image()
 	{
 		vmaDestroyImage(m_parent->m_allocator, m_image, m_allocation);
+		vkDestroyImageView(m_parent->m_context->m_device, m_image_view, m_parent->m_context->m_memory_allocation_callback);
 	}
 
 	void VMA::Image::Write(void* data)
 	{
 		// Staging Buffer
+		if (m_image_channel != 4) log::warn("Writing a {} channels image, but automatically treating it as 4 channels", m_image_channel);
 		auto staging_buffer = m_parent->AllocateBuffer( // Not equal to Image Memory Size
-			static_cast<size_t>(m_image_width) * m_image_height * m_image_channel, 
-			VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, true);
+			static_cast<size_t>(m_image_width) * m_image_height * 4, 
+			//m_allocation->GetSize(),
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, true, false, false);
 		staging_buffer->Write(data);
 
 		TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 		// Copy buffer to image requires the image to be in the right layout first
-		VkBufferImageCopy copyinfo
+		VkBufferImageCopy copyRegion
 		{
 			.bufferOffset = 0,
 			.bufferRowLength = 0,
@@ -204,7 +205,7 @@ namespace RHI
 			.imageSubresource
 			{
 				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-				.mipLevel = m_mipmap_level,
+				.mipLevel = 0,
 				.baseArrayLayer = 0,
 				.layerCount = 1,
 			},
@@ -212,13 +213,22 @@ namespace RHI
 			.imageExtent = {m_image_width, m_image_height, 1}
 		};
 
+		VkImageSubresource subsource{};
+		VkSubresourceLayout reslayout{};
+		//vkGetImageSubresourceLayout(m_parent->m_context->m_device, m_image, &subsource, &reslayout);
+
 		auto commandBuffer = m_parent->m_context->GetOneTimeCommandBuffer();
 		commandBuffer->Begin();
-		vkCmdCopyBufferToImage(*commandBuffer, *staging_buffer, m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyinfo);
+		vkCmdCopyBufferToImage(*commandBuffer, *staging_buffer, m_image, 
+															m_image_layout, 1, &copyRegion);
 		commandBuffer->End();
 		commandBuffer->Submit(true); // Must wait for transfer operation
-
 		TransitionImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	}
+
+	void VMA::Image::BindSampler(std::shared_ptr<RHI::Sampler> sampler)
+	{
+		m_image_sampler = std::move(sampler);
 	}
 
 	void VMA::Image::TransitionImageLayout(VkImageLayout target_layout)
@@ -275,14 +285,20 @@ namespace RHI
 			*commandBuffer,
 			sourceStage,
 			destinationStage,
-			0x0,
-			0, nullptr,
-			0, nullptr,
+			0x0,				// Dependency Flags
+			0, nullptr,	// Memory Barrier
+			0, nullptr,	// Buffer Memory Barrier
 			1, &imageMemoryBarrier);
 		commandBuffer->End();
 		commandBuffer->Submit(true); // Must wait for transfer operation
 
 		m_image_layout = target_layout; // Update Layout
+	}
+
+	VkSampler VMA::Image::GetImageSampler()
+	{ 
+		assert(m_image_sampler != nullptr && "You must call BindSampler() first!");
+		return *m_image_sampler;
 	}
 
 	VkDeviceSize VMA::Image::Size()

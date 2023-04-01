@@ -23,6 +23,8 @@ namespace RHI
 	class DescriptorPool;		// Factory
 	class DescriptorSet;
 
+	class Sampler;
+
 	class Semaphore;	// Add order between queue operations (same queue or different queues) on the GPU
 	class Fence;				// order the execution on the CPU
 
@@ -237,6 +239,7 @@ namespace RHI
 		friend class DescriptorPool;
 	public:
 		void WriteBuffer(VkDescriptorType buffer_type, uint32_t buffer_binding, std::shared_ptr<VMA::Buffer> data);
+		void WriteImage(VkDescriptorType image_type, uint32_t image_binding, std::shared_ptr<VMA::Image> data);
 
 		VkDescriptorSetLayout& GetDescriptorSetLayout() { return descriptor_set_layout; }
 
@@ -257,7 +260,7 @@ namespace RHI
 		friend class DescriptorSet;
 	public:
 		std::shared_ptr<DescriptorSet> AllocateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings);
-		
+
 	public:
 		DescriptorPool() = delete;
 		DescriptorPool(std::shared_ptr<RHI::VulkanContext> vulkan_context, const std::vector<VkDescriptorPoolSize>& pool_size, uint32_t limit_max_sets);
@@ -267,6 +270,23 @@ namespace RHI
 	private:
 		std::shared_ptr<RHI::VulkanContext> m_context;
 		VkDescriptorPool	 m_descriptor_pool = VK_NULL_HANDLE;
+	};
+
+	class Sampler
+	{
+	public:
+		Sampler() = delete;
+		Sampler(std::shared_ptr<RHI::VulkanContext> vulkan_context,
+						VkSamplerAddressMode address_mode,
+						VkBorderColor border_color = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+						VkCompareOp compare_mode = VK_COMPARE_OP_NEVER,
+						bool anisotropy_enable = true);
+		~Sampler();
+		operator VkSampler() { return m_sampler; }
+
+	private:
+		std::shared_ptr<RHI::VulkanContext> m_context;
+		VkSampler m_sampler;
 	};
 
 	class Semaphore

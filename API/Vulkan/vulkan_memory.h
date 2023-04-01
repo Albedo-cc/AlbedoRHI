@@ -12,6 +12,7 @@ namespace Albedo {
 namespace RHI
 {
 	class VulkanContext;
+	class Sampler;
 
 	class VulkanMemoryAllocator : public std::enable_shared_from_this<VulkanMemoryAllocator>
 	{
@@ -46,9 +47,13 @@ namespace RHI
 			friend class VulkanMemoryAllocator;
 		public:
 			void Write(void* data);
+			void BindSampler(std::shared_ptr<RHI::Sampler> sampler);
 
 			void TransitionImageLayout(VkImageLayout target_layout);
+
+			VkImageLayout& GetImageLayout() { return m_image_layout; }
 			VkImageView& GetImageView() { return m_image_view; }
+			VkSampler GetImageSampler();
 			VkDeviceSize Size();
 
 		public:
@@ -62,6 +67,7 @@ namespace RHI
 			VmaAllocation m_allocation = VK_NULL_HANDLE;
 			VkImage m_image = VK_NULL_HANDLE;
 			VkImageView m_image_view = VK_NULL_HANDLE;
+			std::shared_ptr<RHI::Sampler> m_image_sampler;
 
 			VkImageLayout m_image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 			VkFormat m_image_format;

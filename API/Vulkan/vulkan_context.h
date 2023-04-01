@@ -37,6 +37,7 @@ namespace RHI
 
 		VkPhysicalDevice						m_physical_device						= VK_NULL_HANDLE;
 		VkPhysicalDeviceFeatures		m_physical_device_features;
+		VkPhysicalDeviceProperties	m_physical_device_properties;
 		VkPhysicalDeviceMemoryProperties m_physical_device_memory_properties;
 
 		VkDevice									m_device										= VK_NULL_HANDLE;
@@ -104,6 +105,11 @@ namespace RHI
 																												VkCommandPoolCreateFlags command_pool_flags);
 		std::shared_ptr<FramebufferPool>	CreateFramebufferPool();
 		std::shared_ptr<DescriptorPool>		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
+
+		std::shared_ptr<Sampler>					CreateSampler(VkSamplerAddressMode address_mode,
+																									VkBorderColor border_color = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+																									VkCompareOp compare_mode = VK_COMPARE_OP_NEVER,
+																									bool anisotropy_enable = true);
 
 		std::unique_ptr<Semaphore>				CreateSemaphore(VkSemaphoreCreateFlags flags);
 		std::unique_ptr<Fence>						CreateFence(VkFenceCreateFlags flags);
