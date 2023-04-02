@@ -10,6 +10,7 @@
 
 #include <vector>
 #include <format>
+#include <thread>
 #include <cassert>
 #include <memory>
 #include <optional>
@@ -56,10 +57,15 @@ namespace RHI
 		VkFormat									m_swapchain_image_format		= VK_FORMAT_B8G8R8A8_SRGB;
 		VkColorSpaceKHR					m_swapchain_color_space		= VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		VkPresentModeKHR				m_swapchain_present_mode	= VK_PRESENT_MODE_MAILBOX_KHR;
+		VkFormat									m_swapchain_depth_stencil_format	= VK_FORMAT_D32_SFLOAT;
+		VkImageTiling							m_swapchain_depth_stencil_tiling		= VK_IMAGE_TILING_OPTIMAL;
+		uint32_t										m_swapchain_depth_channel;	// Deduced in check_swap_chain_depth_format_support()
+		uint32_t										m_swapchain_stencil_channel;	// Ditto, and you can use this to judge whether has a stencil component
 		VkExtent2D								m_swapchain_current_extent;
 		std::vector<VkImage>				m_swapchain_images;
 		std::vector<VkImageView>		m_swapchain_imageviews;
 		uint32_t										m_swapchain_current_image_index{ 0 };
+		std::shared_ptr<VMA::Image>m_swapchain_depth_stencil_image;
 
 		VkDebugUtilsMessengerEXT	m_debug_messenger					= VK_NULL_HANDLE;
 
@@ -98,12 +104,15 @@ namespace RHI
 		void RecreateSwapChain();
 
 	public:
+		// Create Vulkan Context
+		static std::shared_ptr<VulkanContext>		Create(GLFWwindow* window); // Create Vulkan Context
+
 		// Products
 		std::weak_ptr<VulkanContext>			CreateVulkanContextView() { return shared_from_this(); }
 
 		std::shared_ptr<CommandPool>		CreateCommandPool(	uint32_t submit_queue_family_index,
 																												VkCommandPoolCreateFlags command_pool_flags);
-		std::shared_ptr<FramebufferPool>	CreateFramebufferPool();
+
 		std::shared_ptr<DescriptorPool>		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
 
 		std::shared_ptr<Sampler>					CreateSampler(VkSamplerAddressMode address_mode,
@@ -114,12 +123,15 @@ namespace RHI
 		std::unique_ptr<Semaphore>				CreateSemaphore(VkSemaphoreCreateFlags flags);
 		std::unique_ptr<Fence>						CreateFence(VkFenceCreateFlags flags);
 
-	public:
+	private:
 		VulkanContext() = delete;
-		VulkanContext(GLFWwindow* window);
+		VulkanContext(GLFWwindow* window); // VulkanContext::Create(GLFWwindow* window)
 		~VulkanContext();
 
-	private:
+	protected:
+		// Creation
+		static std::mutex	VULKAN_CONTEXT_CREATION_MUTEX;
+		static bool				NO_VULKAN_CONTEXTS;	
 		// Initialization
 		void enable_validation_layers();
 		void create_vulkan_instance();
@@ -127,16 +139,18 @@ namespace RHI
 		void create_surface();
 		void create_physical_device();
 		void create_logical_device();
+		void create_memory_allocator();
 		void create_swap_chain();
 		// Destroy (reverse order of initialization) 
 		// Physical Devices will be implicitly destroyed when the VkInstance is destroyed.
 		void destroy_swap_chain();
+		void destroy_memory_allocator();
 		void destroy_logical_device();
 		void destroy_surface();
 		void destroy_debug_messenger();
 		void destroy_vulkan_instance();
 
-	private:
+	protected:
 		// Physical Device Support
 		bool check_physical_device_features_support();
 		bool check_physical_device_queue_families_support();
@@ -145,9 +159,10 @@ namespace RHI
 
 		// Swap Chain Support
 		bool check_swap_chain_image_format_support();
+		bool check_swap_chain_depth_format_support();
 		bool check_swap_chain_present_mode_support();
 
-	private: 
+	protected:
 		// Debug Messenger
 		enum vulkan_message_type { VERBOSE, INFO, WARN, ERROR, MAX_MESSAGE_TYPE };
 		static std::vector<uint32_t> s_debug_message_statistics;

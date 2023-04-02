@@ -8,23 +8,13 @@ namespace RHI
 	VulkanContext::VulkanContext(GLFWwindow* window) :
 		m_window{ window }
 	{
-		enable_validation_layers();
-
-		create_vulkan_instance();
-		create_debug_messenger();
-		create_surface();
-		create_physical_device();
-		create_logical_device();
-		create_swap_chain();
-
-		m_memory_allocator = VMA::Create(this);
+		// Please create Vulkan Context via VulkanContext::Create()
 	}
 
 	VulkanContext::~VulkanContext()
 	{
-		m_memory_allocator.reset();
-
 		destroy_swap_chain();
+		destroy_memory_allocator();
 		destroy_logical_device();
 		destroy_surface();
 		destroy_debug_messenger();
@@ -273,13 +263,19 @@ namespace RHI
 			throw std::runtime_error("Failed to create the logical device!");
 	}
 
+	void VulkanContext::create_memory_allocator()
+	{
+		m_memory_allocator = VMA::Create(shared_from_this()); // Cannot call shared_from_this() in constructor!
+	}
+
 	void VulkanContext::create_swap_chain()
 	{
 		if (!check_swap_chain_image_format_support())
 			throw std::runtime_error(std::format("Failed to create the Vulkan Swap Chain - Image format is not supported!"));
+		if (!check_swap_chain_depth_format_support())
+			throw std::runtime_error(std::format("Failed to create the Vulkan Swap Chain - Depth format is not supported!"));
 		if (!check_swap_chain_present_mode_support())
 			throw std::runtime_error(std::format("Failed to create the Vulkan Swap Chain - Present mode is not supported!"));
-
 
 		VkSurfaceCapabilitiesKHR current_surface_capabilities{};
 		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_physical_device, m_surface, &current_surface_capabilities);
@@ -341,6 +337,16 @@ namespace RHI
 		if (vkCreateSwapchainKHR(m_device, &swapChainCreateInfo, m_memory_allocation_callback, &m_swapchain) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Swap Chain!");
 
+		// Create Depth Image
+		m_swapchain_depth_stencil_image = m_memory_allocator->AllocateImage
+																		   (VK_IMAGE_ASPECT_DEPTH_BIT,
+																			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+																			m_swapchain_current_extent.width,
+																			m_swapchain_current_extent.height,
+																			m_swapchain_depth_channel + m_swapchain_stencil_channel,
+																			m_swapchain_depth_stencil_format);
+		m_swapchain_depth_stencil_image->TransitionImageLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
 		// Retrieve the swap chain images
 		vkGetSwapchainImagesKHR(m_device, m_swapchain, &m_swapchain_image_count, nullptr);
 		m_swapchain_images.resize(m_swapchain_image_count);
@@ -376,6 +382,11 @@ namespace RHI
 		for (auto imageview : m_swapchain_imageviews)
 			vkDestroyImageView(m_device, imageview, m_memory_allocation_callback);
 		vkDestroySwapchainKHR(m_device, m_swapchain, m_memory_allocation_callback);
+	}
+
+	void VulkanContext::destroy_memory_allocator()
+	{
+		m_memory_allocator.reset();
 	}
 
 	void VulkanContext::destroy_logical_device()
@@ -533,6 +544,41 @@ namespace RHI
 		return false;
 	}
 
+	bool VulkanContext::check_swap_chain_depth_format_support()
+	{
+		// Deduce Channels
+		if (VK_FORMAT_D32_SFLOAT == m_swapchain_depth_stencil_format)
+		{
+			m_swapchain_stencil_channel = 0;
+			m_swapchain_depth_channel = 4;
+		}
+		else if (VK_FORMAT_D32_SFLOAT_S8_UINT == m_swapchain_depth_stencil_format)
+		{
+			m_swapchain_stencil_channel = 1;
+			m_swapchain_depth_channel = 4;
+		}
+		else if (VK_FORMAT_D24_UNORM_S8_UINT == m_swapchain_depth_stencil_format)
+		{
+			m_swapchain_stencil_channel = 1;
+			m_swapchain_depth_channel = 3;
+		}
+		else throw std::runtime_error("Failed to deduce the Depth Image Format!");
+
+		VkFormatProperties format_properties{};
+		vkGetPhysicalDeviceFormatProperties(m_physical_device, m_swapchain_depth_stencil_format, &format_properties);
+		// 1. Tiling Linear
+		if (VK_IMAGE_TILING_LINEAR == m_swapchain_depth_stencil_tiling &&
+			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT & format_properties.linearTilingFeatures)
+			return true;
+
+		// 2. Tiling Optimal
+		if (VK_IMAGE_TILING_OPTIMAL == m_swapchain_depth_stencil_tiling &&
+			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT & format_properties.optimalTilingFeatures)
+			return true;
+
+		return false;
+	}
+
 	bool VulkanContext::check_swap_chain_present_mode_support()
 	{
 		for (const auto& surface_present_mode : m_surface_present_modes)
@@ -543,16 +589,38 @@ namespace RHI
 		return false;
 	}
 
+	bool VulkanContext::NO_VULKAN_CONTEXTS = true;
+	std::mutex VulkanContext::VULKAN_CONTEXT_CREATION_MUTEX{};
+	std::shared_ptr<VulkanContext> VulkanContext::Create(GLFWwindow* window)
+	{
+		std::scoped_lock guard{ VULKAN_CONTEXT_CREATION_MUTEX };
+		assert(NO_VULKAN_CONTEXTS && "You cannot create multiply Vulkan Contexts!");
+
+		struct VulkanContextCreator : public VulkanContext
+		{
+			VulkanContextCreator(GLFWwindow* window) :VulkanContext{ window } {}
+		};
+
+		auto vulkan_context = std::make_shared<VulkanContextCreator>(window);
+		vulkan_context->enable_validation_layers();
+		
+		vulkan_context->create_vulkan_instance();
+		vulkan_context->create_debug_messenger();
+		vulkan_context->create_surface();
+		vulkan_context->create_physical_device();
+		vulkan_context->create_logical_device();
+		vulkan_context->create_memory_allocator();
+
+		vulkan_context->create_swap_chain();
+
+		NO_VULKAN_CONTEXTS = false;
+		return vulkan_context;
+	}
+
 	std::shared_ptr<CommandPool> VulkanContext::
 		CreateCommandPool(uint32_t submit_queue_family_index,VkCommandPoolCreateFlags command_pool_flags)
 	{
 		return std::make_shared<CommandPool>(shared_from_this(), submit_queue_family_index, command_pool_flags);
-	}
-
-	std::shared_ptr<FramebufferPool> VulkanContext::
-		CreateFramebufferPool()
-	{
-		return std::make_shared<FramebufferPool>(shared_from_this());
 	}
 
 	std::shared_ptr<DescriptorPool> VulkanContext::

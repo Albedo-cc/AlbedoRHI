@@ -1,6 +1,8 @@
 #include "vulkan_context.h"
 #include "vulkan_wrapper.h"
 
+#include <fstream>
+
 namespace Albedo {
 namespace RHI
 {
@@ -12,6 +14,10 @@ namespace RHI
 
 	RenderPass::~RenderPass()
 	{
+		for (auto& frame_buffer : m_framebuffers)
+		{
+			vkDestroyFramebuffer(m_context->m_device, frame_buffer, m_context->m_memory_allocation_callback);
+		}
 		vkDestroyRenderPass(m_context->m_device, m_render_pass, m_context->m_memory_allocation_callback);
 	}
 
@@ -40,19 +46,21 @@ namespace RHI
 			&m_render_pass) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Render Pass!");
 
+		create_framebuffers();
 		create_pipelines();
 	}
 
-	void RenderPass::Begin(std::shared_ptr<CommandBuffer> command_buffer, VkFramebuffer& framebuffer)
+	void RenderPass::Begin(std::shared_ptr<CommandBuffer> command_buffer)
 	{
 		assert(command_buffer->IsRecording() && "You must Begin() the command buffer before Begin() the render pass!");
 
-		static auto clear_color = set_clear_colors();
+		static auto clear_color = set_attachment_clear_colors();
+		auto& current_framebuffer = m_framebuffers[m_context->m_swapchain_current_image_index];
 		VkRenderPassBeginInfo renderPassBeginInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
 			.renderPass = m_render_pass,
-			.framebuffer = framebuffer,
+			.framebuffer = current_framebuffer,
 			.renderArea = set_render_area(),
 			.clearValueCount = static_cast<uint32_t>(clear_color.size()),
 			.pClearValues = clear_color.data()
@@ -68,11 +76,6 @@ namespace RHI
 
 		vkCmdEndRenderPass(*command_buffer);
 	}
-
-	std::vector<VkClearValue>	RenderPass::set_clear_colors()
-	{
-		return { { { {0.0,0.0,0.0,1.0} } } }; 
-	} 
 
 	VkRect2D RenderPass::set_render_area()
 	{ 
@@ -133,6 +136,7 @@ namespace RHI
 		auto shader_stage_state		= prepare_shader_stage_state();
 		auto vertex_inpute_state			= prepare_vertex_input_state();
 		auto input_assembly_state		= prepare_input_assembly_state();
+		auto tessellation_state			= prepare_tessellation_state();
 		auto viewport_state					= prepare_viewport_state();
 		auto rasterization_state			= prepare_rasterization_state();
 		auto multisampling_state		= prepare_multisampling_state();
@@ -151,7 +155,7 @@ namespace RHI
 
 			.pVertexInputState = &vertex_inpute_state,
 			.pInputAssemblyState = &input_assembly_state,
-			.pTessellationState = nullptr,
+			.pTessellationState = &tessellation_state,
 			.pViewportState = &viewport_state,
 			.pRasterizationState = &rasterization_state,
 			.pMultisampleState = &multisampling_state,
@@ -190,13 +194,80 @@ namespace RHI
 		// --------------------------------------------------------------------------------------------------------------------------------//
 	}
 
-	VkShaderModule GraphicsPipeline::create_shader_module(std::string_view shader_file)
+	std::vector<VkDescriptorSetLayout> GraphicsPipeline::
+		prepare_descriptor_layouts()
+	{
+		return {};
+	}
+
+
+	std::vector<VkPushConstantRange> GraphicsPipeline::
+		prepare_push_constant_state()
+	{
+		return {};
+	}
+
+	VkPipelineTessellationStateCreateInfo GraphicsPipeline::
+		prepare_tessellation_state()
+	{
+		return VkPipelineTessellationStateCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+			.patchControlPoints = 0 // Disable
+		};
+	}
+
+	VkPipelineMultisampleStateCreateInfo GraphicsPipeline::
+		prepare_multisampling_state()
+	{
+		return VkPipelineMultisampleStateCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+			.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+			.sampleShadingEnable = VK_FALSE,
+			.minSampleShading = 1.0f,
+			.pSampleMask = nullptr,
+			.alphaToCoverageEnable = VK_FALSE,
+			.alphaToOneEnable = VK_FALSE
+		};
+	}
+
+	VkPipelineDepthStencilStateCreateInfo GraphicsPipeline::
+		prepare_depth_stencil_state()
+	{
+		return VkPipelineDepthStencilStateCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+			.depthTestEnable = VK_FALSE,
+			.depthWriteEnable = VK_FALSE,
+			.depthCompareOp = VK_COMPARE_OP_LESS, // Keep fragments, which has lower depth
+			.depthBoundsTestEnable = VK_FALSE,  // Only keep fragments that fall within the specified depth range.
+			.stencilTestEnable = VK_FALSE,
+			.front = {},
+			.back = {},
+			.minDepthBounds = 0.0,
+			.maxDepthBounds = 1.0
+		};
+	}
+
+	VkPipelineDynamicStateCreateInfo GraphicsPipeline::
+		prepare_dynamic_state()
+	{
+		return VkPipelineDynamicStateCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+			.dynamicStateCount = 0,
+			.pDynamicStates = nullptr
+		};
+	}
+
+	VkShaderModule GraphicsPipeline::create_shader_module(const char* shader_file)
 	{
 		// Check Reload
 		VkShaderModule shader_module{};
 
 		// Read File
-		std::ifstream file(shader_file.data(), std::ios::ate | std::ios::binary);
+		std::ifstream file(shader_file, std::ios::ate | std::ios::binary);
 		if (!file.is_open()) throw std::runtime_error(std::format("Failed to open the shader file {}!", shader_file));
 
 		size_t file_size = static_cast<size_t>(file.tellg());
@@ -223,34 +294,6 @@ namespace RHI
 			throw std::runtime_error("Failed to create shader module!");
 
 		return shader_module;
-	}
-
-	FramebufferPool::FramebufferPool(std::shared_ptr<VulkanContext> vulkan_context) :
-		m_context{ std::move(vulkan_context) }
-	{
-
-	}
-
-	void FramebufferPool::Clear()
-	{
-		if (m_framebuffers.empty()) return;
-		for (auto& frame_buffer : m_framebuffers)
-			vkDestroyFramebuffer(m_context->m_device, frame_buffer, m_context->m_memory_allocation_callback);
-		m_framebuffers.clear();
-	}
-
-	FramebufferPool::FramebufferToken FramebufferPool::
-		AllocateFramebuffer(VkFramebufferCreateInfo& create_info)
-	{
-		auto& framebuffer = m_framebuffers.emplace_back();
-		if (vkCreateFramebuffer(
-			m_context->m_device,
- 			&create_info,
-			m_context->m_memory_allocation_callback,
-			&framebuffer) != VK_SUCCESS)
-			throw std::runtime_error("Failed to create the Vulkan Framebuffer!");
-
-		return Size() - 1;
 	}
 
 	CommandBuffer::CommandBuffer(std::shared_ptr<CommandPool> parent, VkCommandBufferLevel level) :

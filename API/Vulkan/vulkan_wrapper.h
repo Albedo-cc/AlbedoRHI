@@ -2,8 +2,6 @@
 
 #include "vulkan_memory.h"
 
-#include <fstream>
-
 namespace Albedo {
 namespace RHI
 {
@@ -12,8 +10,6 @@ namespace RHI
 	// Wrapper List
 	class RenderPass;			// Abstract Class
 	class GraphicsPipeline;	// Abstract Class
-
-	class FramebufferPool;	// Factory
 
 	class CommandPool;		// Factory
 	class CommandBuffer;
@@ -122,34 +118,13 @@ namespace RHI
 		virtual ~CommandBufferOneTime() override {};
 	};
 
-	class FramebufferPool
-	{
-		using FramebufferToken = size_t;
-	public:
-		FramebufferToken AllocateFramebuffer(VkFramebufferCreateInfo& create_info);
-		VkFramebuffer& GetFramebuffer(FramebufferToken token) { return m_framebuffers[token]; }
-
-		size_t Size() const { return m_framebuffers.size(); }
-		void Clear();
-		VkFramebuffer& operator[](FramebufferToken token){ return m_framebuffers[token]; }
-
-	public:
-		FramebufferPool() = delete;
-		FramebufferPool(std::shared_ptr<VulkanContext> vulkan_context);
-		~FramebufferPool() { Clear(); }
-
-	private:
-		std::shared_ptr<VulkanContext> m_context;
-		std::vector<VkFramebuffer> m_framebuffers;
-	};
-
 	class RenderPass
 	{
 	public:
 		// All derived classes have to call initialize() before beginning the render pass.
 		virtual void Initialize();
 
-		virtual void Begin(std::shared_ptr<CommandBuffer> command_buffer, VkFramebuffer& framebuffer);
+		virtual void Begin(std::shared_ptr<CommandBuffer> command_buffer);
 		virtual void Render(std::shared_ptr<RHI::CommandBuffer> command_buffer) = 0; // You may call pipelines to Draw() here
 		virtual void End(std::shared_ptr<CommandBuffer> command_buffer);
 
@@ -158,13 +133,14 @@ namespace RHI
 
 	protected:
 		virtual std::vector<VkSubpassDependency> set_subpass_dependencies() = 0;
-
+	
 		virtual void create_attachments() = 0;
 		virtual void create_subpasses() = 0;	
+		virtual void create_framebuffers() = 0;
 		virtual void create_pipelines() = 0;
 
-		virtual std::vector<VkClearValue>	set_clear_colors(); /* { return { { { {0.0,0.0,0.0,1.0} } } }; }  use for VK_ATTACHMENT_LOAD_OP_CLEAR*/
-		virtual VkRect2D								set_render_area();  /* { return { { 0,0 }, m_context->m_swapchain_current_extent }; }*/
+		virtual std::vector<VkClearValue>	set_attachment_clear_colors() = 0; // Note that the order of clearValues should be identical to the order of your attachments.
+		virtual VkRect2D								set_render_area()							/*[Optional]*/;
 
 	protected:
 		std::shared_ptr<RHI::VulkanContext> m_context;
@@ -172,6 +148,7 @@ namespace RHI
 		size_t m_current_frame_buffer_index = 0;
 
 		// You may use some enum classes to manage the following descriptiions
+		std::vector<VkFramebuffer> m_framebuffers;
 		std::vector<VkAttachmentDescription> m_attachment_descriptions;
 		std::vector<VkAttachmentReference> m_attachment_references;
 
@@ -196,18 +173,19 @@ namespace RHI
 		operator VkPipeline() { return m_pipeline; }
 
 	protected:
-		virtual std::vector<VkDescriptorSetLayout>  						prepare_descriptor_layouts()			= 0; // Desciptor Pool
-		virtual std::vector<VkPushConstantRange>						prepare_push_constant_state()		= 0;
+		virtual std::vector<VkDescriptorSetLayout>  						prepare_descriptor_layouts()			/* [Optional]*/;
+		virtual std::vector<VkPushConstantRange>						prepare_push_constant_state()		/* [Optional]*/;
 
 		virtual std::vector<VkPipelineShaderStageCreateInfo>		prepare_shader_stage_state()		= 0; // Helper: create_shader_module()
 		virtual VkPipelineVertexInputStateCreateInfo						prepare_vertex_input_state()			= 0;
+		virtual VkPipelineTessellationStateCreateInfo					prepare_tessellation_state()			/* [Optional]*/;
 		virtual VkPipelineInputAssemblyStateCreateInfo				prepare_input_assembly_state()	= 0;
 		virtual VkPipelineViewportStateCreateInfo							prepare_viewport_state()				= 0; // m_viewports & m_scissors
 		virtual VkPipelineRasterizationStateCreateInfo					prepare_rasterization_state()			= 0;
-		virtual VkPipelineMultisampleStateCreateInfo					prepare_multisampling_state()		= 0;
-		virtual VkPipelineDepthStencilStateCreateInfo					prepare_depth_stencil_state()		= 0;
+		virtual VkPipelineMultisampleStateCreateInfo					prepare_multisampling_state()		/* [Optional]*/;
+		virtual VkPipelineDepthStencilStateCreateInfo					prepare_depth_stencil_state()		/* [Optional]*/;
 		virtual VkPipelineColorBlendStateCreateInfo						prepare_color_blend_state()			= 0;
-		virtual VkPipelineDynamicStateCreateInfo							prepare_dynamic_state()				= 0;
+		virtual VkPipelineDynamicStateCreateInfo							prepare_dynamic_state()				/* [Optional]*/;
 
 	public:
 		GraphicsPipeline() = delete;
@@ -217,7 +195,7 @@ namespace RHI
 		virtual ~GraphicsPipeline() noexcept;
 
 	protected:
-		VkShaderModule	create_shader_module(std::string_view shader_file);
+		VkShaderModule	create_shader_module(const char* shader_file);
 
 	protected:
 		std::shared_ptr<RHI::VulkanContext> m_context;

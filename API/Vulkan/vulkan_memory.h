@@ -54,6 +54,7 @@ namespace RHI
 			VkImageLayout& GetImageLayout() { return m_image_layout; }
 			VkImageView& GetImageView() { return m_image_view; }
 			VkSampler GetImageSampler();
+			bool HasStencilComponent();
 			VkDeviceSize Size();
 
 		public:
@@ -80,24 +81,26 @@ namespace RHI
 	public:
 		std::shared_ptr<Buffer> AllocateBuffer(size_t size, VkBufferUsageFlags usage, 
 			bool is_exclusive = true, bool is_writable = false, bool is_readable = false, bool is_persistent = false);
-		std::shared_ptr<Image> AllocateImage(uint32_t width, uint32_t height, uint32_t channel, 
-			VkFormat format, VkImageUsageFlags usage, 
-			VkImageTiling tiling_mode = VK_IMAGE_TILING_OPTIMAL,
-			uint32_t miplevel = 1);
+		std::shared_ptr<Image> AllocateImage(	VkImageAspectFlags aspect,
+																				VkImageUsageFlags usage,
+																				uint32_t width, uint32_t height, 
+																				uint32_t channel, VkFormat format, 
+																				VkImageTiling tiling_mode = VK_IMAGE_TILING_OPTIMAL,
+																				uint32_t miplevel = 1);
 
 		~VulkanMemoryAllocator();
 
 	private: // Created by VulkanContext
-		static auto	Create(VulkanContext* vulkan_context)
+		static auto	Create(std::shared_ptr<VulkanContext> vulkan_context)
 		{
 			struct VMACreator :public VulkanMemoryAllocator 
-			{ VMACreator(VulkanContext* vulkan_context) : VulkanMemoryAllocator{ vulkan_context } {}};
+			{ VMACreator(std::shared_ptr<VulkanContext> vulkan_context) : VulkanMemoryAllocator{ vulkan_context } {}};
 			return std::make_shared<VMACreator>(vulkan_context);
 		}
-		VulkanMemoryAllocator(VulkanContext* vulkan_context);
+		VulkanMemoryAllocator(std::shared_ptr<VulkanContext> vulkan_context);
 
 	private:
-		VulkanContext* const m_context;
+		std::shared_ptr<VulkanContext> m_context;
 		VmaAllocator m_allocator = VK_NULL_HANDLE;
 	};
 	using VMA = VulkanMemoryAllocator;
