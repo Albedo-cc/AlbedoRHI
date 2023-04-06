@@ -102,6 +102,17 @@ namespace RHI
 		return m_allocation->GetMappedData();
 	}
 
+	VkBufferCopy VMA::Buffer::
+		GetCopyInfo(VkDeviceSize size /* = ALL*/, VkDeviceSize offset_src/* = 0*/, VkDeviceSize offset_dst/* = 0*/)
+	{
+		return VkBufferCopy
+		{
+			.srcOffset = offset_src,
+			.dstOffset = offset_dst,
+			.size = size ? size : Size()
+		};
+	}
+
 	VkDeviceSize VMA::Buffer::Size()
 	{
 		return m_allocation->GetSize();
@@ -190,14 +201,12 @@ namespace RHI
 	void VMA::Image::Write(void* data)
 	{
 		// Staging Buffer
+		size_t image_size = static_cast<size_t>(m_image_width) * m_image_height * 4;
+		auto staging_buffer = m_parent->AllocateStagingBuffer(image_size);  // May not equal to Image Memory Size
+
 		if (m_image_channel != 4) log::warn("Writing a {} channels image, but automatically treating it as 4 channels", m_image_channel);
-		auto staging_buffer = m_parent->AllocateBuffer( // Not equal to Image Memory Size
-			static_cast<size_t>(m_image_width) * m_image_height * 4, 
-			//m_allocation->GetSize(),
-			VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, true, false, false);
 		staging_buffer->Write(data);
 
-		TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 		// Copy buffer to image requires the image to be in the right layout first
 		VkBufferImageCopy copyRegion
 		{
@@ -215,17 +224,42 @@ namespace RHI
 			.imageExtent = {m_image_width, m_image_height, 1}
 		};
 
-		VkImageSubresource subsource{};
-		VkSubresourceLayout reslayout{};
-		//vkGetImageSubresourceLayout(m_parent->m_context->m_device, m_image, &subsource, &reslayout);
-
 		auto commandBuffer = m_parent->m_context->GetOneTimeCommandBuffer();
 		commandBuffer->Begin();
-		vkCmdCopyBufferToImage(*commandBuffer, *staging_buffer, m_image, 
-															m_image_layout, 1, &copyRegion);
+		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		vkCmdCopyBufferToImage(*commandBuffer, *staging_buffer, m_image, m_image_layout, 1, &copyRegion);
+		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		commandBuffer->End();
 		commandBuffer->Submit(true); // Must wait for transfer operation
-		TransitionImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	}
+
+	void VMA::Image::WriteCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, void* data)
+	{
+		// Staging Buffer
+		size_t image_size = static_cast<size_t>(m_image_width) * m_image_height * 4;
+		auto staging_buffer = m_parent->AllocateStagingBuffer(image_size);  // May not equal to Image Memory Size
+
+		if (m_image_channel != 4) log::warn("Writing a {} channels image, but automatically treating it as 4 channels", m_image_channel);
+		staging_buffer->Write(data);
+
+		// Copy buffer to image requires the image to be in the right layout first
+		VkBufferImageCopy copyRegion
+		{
+			.bufferOffset = 0,
+			.bufferRowLength = 0,
+			.bufferImageHeight = 0,
+			.imageSubresource
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.mipLevel = 0,
+				.baseArrayLayer = 0,
+				.layerCount = 1,
+			},
+			.imageOffset = {0,0,0},
+			.imageExtent = {m_image_width, m_image_height, 1}
+		};
+
+		vkCmdCopyBufferToImage(*commandBuffer, *staging_buffer, m_image, m_image_layout, 1, &copyRegion);
 	}
 
 	void VMA::Image::BindSampler(std::shared_ptr<RHI::Sampler> sampler)
@@ -233,79 +267,24 @@ namespace RHI
 		m_image_sampler = std::move(sampler);
 	}
 
-	void VMA::Image::TransitionImageLayout(VkImageLayout target_layout)
+	void VMA::Image::TransitionLayout(VkImageLayout target_layout)
 	{
-		// Barriers are primarily used for synchronization purposes, so you must specify which types of operations that involve 
-		//the resource must happen before the barrier, 
-		//and which operations that involve the resource must wait on the barrier.
-		VkImageAspectFlags imageAspect;
-		VkAccessFlags srcAccessMask;
-		VkAccessFlags dstAccessMask;
-		VkPipelineStageFlags sourceStage;
-		VkPipelineStageFlags destinationStage;
-
-		if ( // Undefined Image => Transfer Destination Image
-			VK_IMAGE_LAYOUT_UNDEFINED == m_image_layout&&
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == target_layout)
-		{
-			imageAspect = VK_IMAGE_ASPECT_COLOR_BIT;
-
-			srcAccessMask = 0;
-			dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-			destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		}
-		else if ( // Undefined Image => Depth Stencil Image
-			VK_IMAGE_LAYOUT_UNDEFINED == m_image_layout &&
-			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL == target_layout)
-		{
-			imageAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-			if (HasStencilComponent()) imageAspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
-
-			srcAccessMask = 0;
-			dstAccessMask =	VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-											VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-			destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-		}
-		else if ( // Transfer Destination Image => Shader Read-only Image
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == m_image_layout&&
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL == target_layout)
-		{
-			imageAspect = VK_IMAGE_ASPECT_COLOR_BIT;
-
-			srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-			sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-			destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-		}
-		else throw std::invalid_argument("Failed to transition the Vulkan Image Layout - Unsupported layout transition!");
-
-		VkImageMemoryBarrier imageMemoryBarrier
-		{
-			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			.srcAccessMask = srcAccessMask,
-			.dstAccessMask = dstAccessMask,
-			.oldLayout = m_image_layout,
-			.newLayout = target_layout,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_image,
-			.subresourceRange
-			{
-				.aspectMask = imageAspect,
-				.baseMipLevel = 0,
-				.levelCount = 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1
-			}
-		};
-
 		auto commandBuffer = m_parent->m_context->GetOneTimeCommandBuffer();
 		commandBuffer->Begin();
+		TransitionLayoutCommand(commandBuffer, target_layout);
+		commandBuffer->End();
+		commandBuffer->Submit(true); // Must wait for transfer operation
+
+		m_image_layout = target_layout; // Update Layout
+	}
+
+	void VMA::Image::TransitionLayoutCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, VkImageLayout target_layout)
+	{
+		assert(commandBuffer->IsRecording() &&
+			"You have to ensure that the command buffer is recording while using XXXCommand funcitons!");
+		VkPipelineStageFlags sourceStage, destinationStage;
+		auto imageMemoryBarrier = deduce_transition_layout_barrier(target_layout, sourceStage, destinationStage);
+
 		vkCmdPipelineBarrier( // P213
 			*commandBuffer,
 			sourceStage,
@@ -314,8 +293,6 @@ namespace RHI
 			0, nullptr,	// Memory Barrier
 			0, nullptr,	// Buffer Memory Barrier
 			1, &imageMemoryBarrier);
-		commandBuffer->End();
-		commandBuffer->Submit(true); // Must wait for transfer operation
 
 		m_image_layout = target_layout; // Update Layout
 	}
@@ -337,6 +314,84 @@ namespace RHI
 	VkDeviceSize VMA::Image::Size()
 	{
 		return m_allocation->GetSize();
+	}
+
+	VkImageMemoryBarrier VMA::Image::
+		deduce_transition_layout_barrier(VkImageLayout target_layout, 
+			VkPipelineStageFlags& stage_src, VkPipelineStageFlags& stage_dst)
+	{
+		// Barriers are primarily used for synchronization purposes, so you must specify which types of operations that involve 
+		//the resource must happen before the barrier, 
+		//and which operations that involve the resource must wait on the barrier.
+		VkImageAspectFlags imageAspect;
+		VkAccessFlags srcAccessMask;
+		VkAccessFlags dstAccessMask;
+
+		if ( // Undefined Image => Transfer Destination Image
+			VK_IMAGE_LAYOUT_UNDEFINED == m_image_layout &&
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == target_layout)
+		{
+			imageAspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+			srcAccessMask = 0;
+			dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+			stage_src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			stage_dst = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		}
+		else if ( // Undefined Image => Depth Stencil Image
+			VK_IMAGE_LAYOUT_UNDEFINED == m_image_layout &&
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL == target_layout)
+		{
+			imageAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+			if (HasStencilComponent()) imageAspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+
+			srcAccessMask = 0;
+			dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+			stage_src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			stage_dst = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+		}
+		else if ( // Transfer Destination Image => Shader Read-only Image
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == m_image_layout &&
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL == target_layout)
+		{
+			imageAspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+			srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+			stage_src = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			stage_dst = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		}
+		else throw std::invalid_argument("Failed to transition the Vulkan Image Layout - Unsupported layout transition!");
+
+		return VkImageMemoryBarrier
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			.srcAccessMask = srcAccessMask,
+			.dstAccessMask = dstAccessMask,
+			.oldLayout = m_image_layout,
+			.newLayout = target_layout,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_image,
+			.subresourceRange
+			{
+				.aspectMask = imageAspect,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			}
+		};
+	}
+
+	std::shared_ptr<VMA::Buffer> VMA::
+		AllocateStagingBuffer(VkDeviceSize buffer_size)
+	{
+		return AllocateBuffer(buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, true, false);
 	}
 
 }} // namespace Albedo::RHI

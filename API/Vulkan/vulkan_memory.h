@@ -12,6 +12,7 @@ namespace Albedo {
 namespace RHI
 {
 	class VulkanContext;
+	class CommandBuffer;
 	class Sampler;
 
 	class VulkanMemoryAllocator : public std::enable_shared_from_this<VulkanMemoryAllocator>
@@ -27,6 +28,7 @@ namespace RHI
 		public:
 			void		Write(void* data);	// The buffer must be mapping-allowed and writable
 			void*	Access();				// If the buffer is persistently mapped, you can access its memory directly
+			VkBufferCopy GetCopyInfo(VkDeviceSize size = 0/*ALL*/, VkDeviceSize offset_src = 0, VkDeviceSize offset_dst = 0);
 			VkDeviceSize Size();
 
 		public:
@@ -47,9 +49,11 @@ namespace RHI
 			friend class VulkanMemoryAllocator;
 		public:
 			void Write(void* data);
+			void WriteCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, void* data);
 			void BindSampler(std::shared_ptr<RHI::Sampler> sampler);
 
-			void TransitionImageLayout(VkImageLayout target_layout);
+			void TransitionLayout(VkImageLayout target_layout);
+			void TransitionLayoutCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, VkImageLayout target_layout);
 
 			VkImageLayout& GetImageLayout() { return m_image_layout; }
 			VkImageView& GetImageView() { return m_image_view; }
@@ -76,6 +80,9 @@ namespace RHI
 			uint32_t m_image_height;
 			uint32_t m_image_channel;
 			uint32_t m_mipmap_level;
+
+		private:
+			VkImageMemoryBarrier deduce_transition_layout_barrier(VkImageLayout target_layout, VkPipelineStageFlags& stage_src, VkPipelineStageFlags& stage_dst);
 		};
 
 	public:
@@ -87,6 +94,7 @@ namespace RHI
 																				uint32_t channel, VkFormat format, 
 																				VkImageTiling tiling_mode = VK_IMAGE_TILING_OPTIMAL,
 																				uint32_t miplevel = 1);
+		std::shared_ptr<Buffer> AllocateStagingBuffer(VkDeviceSize buffer_size);
 
 		~VulkanMemoryAllocator();
 

@@ -345,7 +345,7 @@ namespace RHI
 																			m_swapchain_current_extent.height,
 																			m_swapchain_depth_channel + m_swapchain_stencil_channel,
 																			m_swapchain_depth_stencil_format);
-		m_swapchain_depth_stencil_image->TransitionImageLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+		m_swapchain_depth_stencil_image->TransitionLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
 		// Retrieve the swap chain images
 		vkGetSwapchainImagesKHR(m_device, m_swapchain, &m_swapchain_image_count, nullptr);

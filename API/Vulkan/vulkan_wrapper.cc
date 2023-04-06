@@ -14,6 +14,10 @@ namespace RHI
 
 	RenderPass::~RenderPass()
 	{
+		for (auto& graphics_pipeline : m_graphics_pipelines)
+		{
+			delete graphics_pipeline;
+		}
 		for (auto& frame_buffer : m_framebuffers)
 		{
 			vkDestroyFramebuffer(m_context->m_device, frame_buffer, m_context->m_memory_allocation_callback);

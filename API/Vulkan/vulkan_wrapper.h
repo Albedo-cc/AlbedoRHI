@@ -125,7 +125,7 @@ namespace RHI
 		virtual void Initialize();
 
 		virtual void Begin(std::shared_ptr<CommandBuffer> command_buffer);
-		virtual void Render(std::shared_ptr<RHI::CommandBuffer> command_buffer) = 0; // You may call pipelines to Draw() here
+		const std::vector<GraphicsPipeline*>& GetGraphicsPipelines() {return m_graphics_pipelines; } // Call pipeline.Bind() first, and then callvkCmdDraw
 		virtual void End(std::shared_ptr<CommandBuffer> command_buffer);
 
 		void SetCurrentFrameBufferIndex(size_t index) { m_current_frame_buffer_index = index; }
@@ -153,7 +153,7 @@ namespace RHI
 		std::vector<VkAttachmentReference> m_attachment_references;
 
 		std::vector<VkSubpassDescription> m_subpass_descriptions;
-		std::vector<std::unique_ptr<GraphicsPipeline>> m_graphics_pipelines;
+		std::vector<GraphicsPipeline*> m_graphics_pipelines;
 
 	public:
 		RenderPass() = delete;
@@ -167,7 +167,7 @@ namespace RHI
 		// All derived classes have to call initialize() before beginning the render pass.
 		virtual void Initialize();
 
-		virtual void Draw(std::shared_ptr<RHI::CommandBuffer> command_buffer) = 0; // vkCmdDraw ...
+		virtual void Bind(std::shared_ptr<RHI::CommandBuffer> command_buffer) = 0; // vkCmdDraw ...
 
 		VkPipelineLayout GetPipelineLayout() { return m_pipeline_layout; }
 		operator VkPipeline() { return m_pipeline; }
