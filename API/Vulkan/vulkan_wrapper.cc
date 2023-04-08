@@ -3,6 +3,8 @@
 
 #include <fstream>
 
+#include <spirv_reflect.h>
+
 namespace Albedo {
 namespace RHI
 {
@@ -95,7 +97,7 @@ namespace RHI
 		m_base_pipeline { base_pipeline },
 		m_base_pipeline_index { base_pipeline_index }
 	{
-
+		
 	}
 
 	GraphicsPipeline::~GraphicsPipeline()
@@ -107,14 +109,104 @@ namespace RHI
 	void GraphicsPipeline::Initialize()
 	{
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		// 1. Create Pipeline Layout
+		// 1. Create Shader Stages & Deduce Pipeline Layout
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		// Descriptor Set Layouts
+		// Descriptor Set Layouts & Push Constants
 		auto descriptor_set_layouts = prepare_descriptor_layouts();
+		auto push_constant_state = prepare_push_constant_state();
+		auto descriptor_bindings = descriptor_set_layouts.empty() ? new std::vector<DescriptorBinding>() : nullptr;
+		auto push_constant_ranges = push_constant_state.empty() ? new std::vector<PushConstantRange>() : nullptr;
 
-		// Push Constants
-		auto push_constant_state  = prepare_push_constant_state();
+		// Shaders
+		std::vector<VkPipelineShaderStageCreateInfo> shaderInfos(MAX_SHADER_COUNT);
+		auto shaders = prepare_shader_files();
+		// Vertex Shader
+		shaderInfos[vertex_shader].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		shaderInfos[vertex_shader].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		shaderInfos[vertex_shader].module = create_shader_module(shaders[vertex_shader], VK_SHADER_STAGE_VERTEX_BIT, descriptor_bindings, nullptr);
+		shaderInfos[vertex_shader].pName = "main";
+		// Fragment Shader
+		shaderInfos[fragment_shader].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		shaderInfos[fragment_shader].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		shaderInfos[fragment_shader].module = create_shader_module(shaders[fragment_shader], VK_SHADER_STAGE_FRAGMENT_BIT, descriptor_bindings, nullptr);
+		shaderInfos[fragment_shader].pName = "main";
 
+		// Deduce Pipeline Layout
+		if (descriptor_bindings && !descriptor_bindings->empty())
+		{
+			if (descriptor_bindings->size() > 1)
+				std::sort(descriptor_bindings->begin(), descriptor_bindings->end(),
+					[](const DescriptorBinding& next, const DescriptorBinding& prev)->bool
+					{
+						if (next.set == prev.set) return next.binding < prev.binding; // Descending Binding Index
+						else return next.set < prev.set; // Descending Set Index
+					});
+
+			size_t max_set = descriptor_bindings->front().set + 1;
+			descriptor_set_layouts.resize(max_set);
+			std::vector<std::vector<VkDescriptorSetLayoutBinding>> descriptorSets(max_set);
+			
+			for (auto& currentBinding : *descriptor_bindings)
+			{
+				auto& currentSet = descriptorSets[currentBinding.set];
+				if (currentSet.empty())
+				{
+					currentSet.reserve(currentBinding.binding + 1); // DESC Sorted
+					currentSet.emplace_back(currentBinding);
+				}
+				else
+				{
+					auto& previousBinding = currentSet.back();
+					if (currentBinding.binding == previousBinding.binding)
+					{
+						previousBinding.stageFlags |= currentBinding.stages; // Same binding but different stages.
+					} 
+					else currentSet.emplace_back(currentBinding); // Differernt bindings
+				}
+			}
+
+
+			// Debug)))))>>>>>>>>>>>>>>
+			for (auto& set : descriptorSets)
+			{
+				static int cnt = 0;
+				log::debug("\nCurrent Set {}", cnt++);
+				for (auto& binding : set)
+				{
+					log::info("flags {}, count {}, type {}", binding.stageFlags, binding.descriptorCount, binding.descriptorType);
+				}
+			}
+
+			// Create Descriptor Set Layouts
+			for (size_t current_set = 0; current_set < max_set; ++current_set)
+			{
+				auto& descriptor_set_layout = descriptor_set_layouts[current_set];
+				VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo
+				{
+					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+					.bindingCount = static_cast<uint32_t>(descriptorSets[current_set].size()),
+					.pBindings = descriptorSets[current_set].data()
+				};
+				if (vkCreateDescriptorSetLayout(
+					m_context->m_device,
+					&descriptorSetLayoutCreateInfo,
+					m_context->m_memory_allocation_callback,
+					&descriptor_set_layout) != VK_SUCCESS)
+					throw std::runtime_error("Failed to create the Vulkan Desceriptor Set Layout automatically!");
+			}
+		} // End deduce descriptor set layouts
+
+		if (push_constant_ranges && !push_constant_ranges->empty()) // && >0
+		{
+			//push_constant_state.resize(INTERSECTION)
+		}
+		// --------------------------------------------------------------------------------------------------------------------------------//
+		
+
+
+		// --------------------------------------------------------------------------------------------------------------------------------//
+		// 2. Create Pipeline Layout
+		// --------------------------------------------------------------------------------------------------------------------------------//
 		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -135,9 +227,8 @@ namespace RHI
 
 
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		// 2. Create Graphics Pipeline
+		// 3. Create Graphics Pipeline
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		auto shader_stage_state		= prepare_shader_stage_state();
 		auto vertex_inpute_state			= prepare_vertex_input_state();
 		auto input_assembly_state		= prepare_input_assembly_state();
 		auto tessellation_state			= prepare_tessellation_state();
@@ -154,8 +245,8 @@ namespace RHI
 			.pNext = nullptr,
 			.flags = 0x0,
 
-			.stageCount = static_cast<uint32_t>(shader_stage_state.size()),
-			.pStages = shader_stage_state.data(),
+			.stageCount = static_cast<uint32_t>(shaderInfos.size()),
+			.pStages = shaderInfos.data(),
 
 			.pVertexInputState = &vertex_inpute_state,
 			.pInputAssemblyState = &input_assembly_state,
@@ -187,12 +278,15 @@ namespace RHI
 
 
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		// 3. Free Resource
+		// 4. Free Resource
 		// --------------------------------------------------------------------------------------------------------------------------------//
+		// Deducers
+		delete descriptor_bindings;
+		delete push_constant_ranges;
 		// Shader Modules
-		for (auto& shader_stage : shader_stage_state)
+		for (auto& shaderInfo : shaderInfos)
 		{
-			vkDestroyShaderModule(m_context->m_device, shader_stage.module, 
+			vkDestroyShaderModule(m_context->m_device, shaderInfo.module,
 														 m_context->m_memory_allocation_callback);
 		}
 		// --------------------------------------------------------------------------------------------------------------------------------//
@@ -204,7 +298,6 @@ namespace RHI
 		return {};
 	}
 
-
 	std::vector<VkPushConstantRange> GraphicsPipeline::
 		prepare_push_constant_state()
 	{
@@ -214,6 +307,8 @@ namespace RHI
 	VkPipelineTessellationStateCreateInfo GraphicsPipeline::
 		prepare_tessellation_state()
 	{
+		
+
 		return VkPipelineTessellationStateCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
@@ -265,13 +360,17 @@ namespace RHI
 		};
 	}
 
-	VkShaderModule GraphicsPipeline::create_shader_module(const char* shader_file)
+	VkShaderModule GraphicsPipeline::create_shader_module(
+		std::string_view shader_file, 
+		VkShaderStageFlags shader_stage, 
+		std::vector<DescriptorBinding>* descriptor_set_layout_bindings,
+		std::vector<PushConstantRange>* push_constants)
 	{
 		// Check Reload
 		VkShaderModule shader_module{};
 
 		// Read File
-		std::ifstream file(shader_file, std::ios::ate | std::ios::binary);
+		std::ifstream file(shader_file.data(), std::ios::ate | std::ios::binary);
 		if (!file.is_open()) throw std::runtime_error(std::format("Failed to open the shader file {}!", shader_file));
 
 		size_t file_size = static_cast<size_t>(file.tellg());
@@ -295,7 +394,65 @@ namespace RHI
 			&shaderModuleCreateInfo,
 			m_context->m_memory_allocation_callback,
 			&shader_module) != VK_SUCCESS)
-			throw std::runtime_error("Failed to create shader module!");
+			throw std::runtime_error(std::format("Failed to create shader module {}!", shader_file));
+
+		if (descriptor_set_layout_bindings || push_constants)
+		{
+			SpvReflectShaderModule spvContext;
+			SpvReflectResult result = spvReflectCreateShaderModule(file_size, buffer.data(), &spvContext);
+			assert(result == SPV_REFLECT_RESULT_SUCCESS);
+			uint32_t count = 0;
+
+			if (descriptor_set_layout_bindings)
+			{
+				if (spvReflectEnumerateDescriptorSets(&spvContext, &count, NULL) != SPV_REFLECT_RESULT_SUCCESS)
+					throw std::runtime_error(std::format("Failed to reflect descriptor sets of shader {}!", shader_file));
+
+				SpvReflectDescriptorSet** pDescriptorSets = new SpvReflectDescriptorSet * [count];
+				spvReflectEnumerateDescriptorSets(&spvContext, &count, pDescriptorSets);
+
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					DescriptorBinding descriptorBinding{ .set = pDescriptorSets[i]->set, .stages = shader_stage };
+					
+					log::debug("Set {} Bindings {}", pDescriptorSets[i]->set, pDescriptorSets[i]->binding_count);
+					auto& bindings = pDescriptorSets[i]->bindings;
+					for (uint32_t j = 0; j < pDescriptorSets[i]->binding_count; ++j)
+					{
+						descriptorBinding.binding = bindings[j]->binding;
+						descriptorBinding.count = bindings[j]->count;
+						descriptorBinding.type = static_cast<VkDescriptorType>(bindings[j]->descriptor_type);
+						log::debug("binding {}, name {}, count {}", bindings[j]->binding, bindings[j]->name, bindings[j]->count);
+					}
+					descriptor_set_layout_bindings->emplace_back(descriptorBinding);
+				}
+				delete[] pDescriptorSets;
+			}
+
+			if (push_constants)
+			{
+				if (spvReflectEnumeratePushConstants(&spvContext, &count, NULL) != SPV_REFLECT_RESULT_SUCCESS)
+					throw std::runtime_error(std::format("Failed to reflect push constants of shader {}!", shader_file));
+
+				SpvReflectBlockVariable** pPushConstants = new SpvReflectBlockVariable * [count];
+				spvReflectEnumeratePushConstants(&spvContext, &count, NULL);
+
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					log::debug("Push Constant: offset {}, size {}", pPushConstants[i]->offset, pPushConstants[i]->size);
+					push_constants->emplace_back(
+						PushConstantRange
+						{
+							.stages = shader_stage,
+							.offset = pPushConstants[i]->offset,
+							.size = pPushConstants[i]->size
+						});
+				}
+				delete[] pPushConstants;
+			}
+
+			spvReflectDestroyShaderModule(&spvContext);
+		}
 
 		return shader_module;
 	}

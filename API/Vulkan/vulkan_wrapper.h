@@ -19,6 +19,9 @@ namespace RHI
 	class DescriptorPool;		// Factory
 	class DescriptorSet;
 
+	class DescriptorBinding;
+	class PushConstantRange;
+
 	class Sampler;
 
 	class Semaphore;	// Add order between queue operations (same queue or different queues) on the GPU
@@ -161,6 +164,70 @@ namespace RHI
 		virtual ~RenderPass() noexcept;
 	};
 
+
+	class DescriptorBinding
+	{
+	public:
+		uint32_t set;
+		uint32_t binding;
+		VkDescriptorType type;
+		uint32_t count;
+		VkShaderStageFlags stages;
+
+		operator VkDescriptorSetLayoutBinding() const
+		{
+			return VkDescriptorSetLayoutBinding
+			{
+				.binding = binding,
+				.descriptorType = type,
+				.descriptorCount = count,
+				.stageFlags = stages,
+				.pImmutableSamplers = nullptr
+			};
+		}
+		
+		bool operator==(const DescriptorBinding& another) const
+		{
+			return set == another.set && binding == another.binding; // Type? (Shader Union)
+		}
+
+		struct Hash
+		{
+			uint64_t operator()(const DescriptorBinding& binding) const
+			{
+				uint64_t hash{ binding.set };
+				return (hash << 32) | binding.binding;
+			}
+		};
+	};
+
+	class PushConstantRange
+	{
+	public:
+		VkShaderStageFlags    stages;
+		uint32_t              offset;
+		uint32_t              size;
+
+		operator VkPushConstantRange() const
+		{
+			return VkPushConstantRange
+			{
+				.stageFlags = stages,
+				.offset = offset,
+				.size = size
+			};
+		}
+
+		struct Hash
+		{
+			uint64_t operator()(const PushConstantRange& push_constant_range)
+			{
+				uint64_t hash{ push_constant_range.offset };
+				return hash << 32 | push_constant_range.size;
+			}
+		};
+	};
+
 	class GraphicsPipeline
 	{
 	public:
@@ -173,10 +240,11 @@ namespace RHI
 		operator VkPipeline() { return m_pipeline; }
 
 	protected:
-		virtual std::vector<VkDescriptorSetLayout>  						prepare_descriptor_layouts()			/* [Optional]*/;
-		virtual std::vector<VkPushConstantRange>						prepare_push_constant_state()		/* [Optional]*/;
+		virtual std::vector<VkDescriptorSetLayout>  						prepare_descriptor_layouts()			/* [Optional]: Layout will be reflected automatically*/;
+		virtual std::vector<VkPushConstantRange>						prepare_push_constant_state()		/* [Optional]: Layout will be reflected automatically*/;
 
-		virtual std::vector<VkPipelineShaderStageCreateInfo>		prepare_shader_stage_state()		= 0; // Helper: create_shader_module()
+		enum ShaderTypes{vertex_shader, fragment_shader, MAX_SHADER_COUNT};
+		virtual std::array<std::string, MAX_SHADER_COUNT>		prepare_shader_files()		= 0;			// Use ShaderTypes enum
 		virtual VkPipelineVertexInputStateCreateInfo						prepare_vertex_input_state()			= 0;
 		virtual VkPipelineTessellationStateCreateInfo					prepare_tessellation_state()			/* [Optional]*/;
 		virtual VkPipelineInputAssemblyStateCreateInfo				prepare_input_assembly_state()	= 0;
@@ -195,7 +263,9 @@ namespace RHI
 		virtual ~GraphicsPipeline() noexcept;
 
 	protected:
-		VkShaderModule	create_shader_module(const char* shader_file);
+		VkShaderModule	create_shader_module(std::string_view shader_file, VkShaderStageFlags shader_stage,
+										std::vector<DescriptorBinding>* descriptor_set_layout_bindings,
+										std::vector<PushConstantRange>* push_constants);
 
 	protected:
 		std::shared_ptr<RHI::VulkanContext> m_context;

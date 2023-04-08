@@ -8,17 +8,6 @@
 #include "vulkan_wrapper.h"
 #include "vulkan_memory.h"
 
-#include <vector>
-#include <format>
-#include <thread>
-#include <cassert>
-#include <memory>
-#include <optional>
-#include <numeric>
-#include <stdexcept>
-#include <algorithm>
-#include <unordered_set>
-
 namespace Albedo {
 namespace RHI
 {
@@ -40,6 +29,7 @@ namespace RHI
 		VkPhysicalDeviceFeatures		m_physical_device_features;
 		VkPhysicalDeviceProperties	m_physical_device_properties;
 		VkPhysicalDeviceMemoryProperties m_physical_device_memory_properties;
+		std::optional<VkPhysicalDeviceFeatures2> m_physical_device_features2;	// Future: Enable Bindless
 
 		VkDevice									m_device										= VK_NULL_HANDLE;
 		std::optional<uint32_t>			m_device_queue_graphics;
@@ -81,13 +71,15 @@ namespace RHI
 #ifdef NDEBUG
 		std::vector<const char*>			m_validation_layers{"VK_LAYER_RENDERDOC_Capture"};
 
-		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+																									 /*VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME*/ };
 #else
 		std::vector<const char*>			m_validation_layers{ "VK_LAYER_KHRONOS_validation",
 																								 "VK_LAYER_RENDERDOC_Capture" };
 
-		std::vector<const char*>			m_device_extensions{ VK_EXT_DEBUG_MARKER_EXTENSION_NAME,
-																									 VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+																									 VK_EXT_DEBUG_MARKER_EXTENSION_NAME,
+																									 /*VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME*/ };
 #endif	
 
 	public:

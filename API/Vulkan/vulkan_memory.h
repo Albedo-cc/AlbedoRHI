@@ -1,8 +1,20 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+
+#include <unordered_set>
+#include <string_view>
+#include <stdexcept>
+#include <algorithm>
+#include <optional>
 #include <memory>
+#include <numeric>
+#include <cassert>
+#include <format>
+#include <thread>
 #include <vector>
+#include <string>
+#include <array>
 
 // Predeclaration
 typedef struct VmaAllocator_T* VmaAllocator;
@@ -100,7 +112,7 @@ namespace RHI
 
 	private: // Created by VulkanContext
 		static auto	Create(std::shared_ptr<VulkanContext> vulkan_context)
-		{
+		{ 
 			struct VMACreator :public VulkanMemoryAllocator 
 			{ VMACreator(std::shared_ptr<VulkanContext> vulkan_context) : VulkanMemoryAllocator{ vulkan_context } {}};
 			return std::make_shared<VMACreator>(vulkan_context);

@@ -136,7 +136,7 @@ namespace RHI
 		VkApplicationInfo appInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-			.pApplicationName = "Albedo RHI",
+			.pApplicationName = "Albedo",
 			.applicationVersion = VK_MAKE_VERSION(1, 0, 0),
 			.pEngineName = "Albedo",
 			.engineVersion = VK_MAKE_VERSION(1, 0, 0),
@@ -252,11 +252,13 @@ namespace RHI
 		VkDeviceCreateInfo deviceCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+			
+			.pNext = m_physical_device_features2 .has_value()? &(m_physical_device_features2.value()) : nullptr,
 			.queueCreateInfoCount = static_cast<uint32_t>(deviceQueueCreateInfos.size()),
 			.pQueueCreateInfos = deviceQueueCreateInfos.data(),
 			.enabledExtensionCount = static_cast<uint32_t>(m_device_extensions.size()),
 			.ppEnabledExtensionNames = m_device_extensions.data(),
-			.pEnabledFeatures = &m_physical_device_features
+			.pEnabledFeatures = m_physical_device_features2.has_value() ? nullptr : &m_physical_device_features// (If pNext includes a VkPhysicalDeviceFeatures2, here should be NULL)
 		};
 		
 		if (vkCreateDevice(m_physical_device, &deviceCreateInfo, m_memory_allocation_callback, &m_device) != VK_SUCCESS)
@@ -421,16 +423,29 @@ namespace RHI
 
 	bool VulkanContext::check_physical_device_features_support()
 	{
-		VkPhysicalDeviceProperties phyDevProperties;
-		VkPhysicalDeviceFeatures phyDevFeatures;
-		vkGetPhysicalDeviceProperties(m_physical_device, &phyDevProperties);
-		vkGetPhysicalDeviceFeatures(m_physical_device, &phyDevFeatures);
+		// Properties
+		vkGetPhysicalDeviceProperties(m_physical_device, &m_physical_device_properties);
+		if (m_physical_device_properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+			return false;
 
-		if (!phyDevFeatures.samplerAnisotropy) return false;
+		// Basic Features
+		vkGetPhysicalDeviceFeatures(m_physical_device, &m_physical_device_features);
+		if (m_physical_device_features.samplerAnisotropy != VK_TRUE)
+			return false;
 
-		/*if(phyDevProperties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ||
-			phyDevFeatures.geometryShader != VK_TRUE)
+		// Advanced Features
+		// Bindless
+		/*static VkPhysicalDeviceDescriptorIndexingFeatures feature_descriptor_indexing
+		{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
+
+		m_physical_device_features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		m_physical_device_features2.pNext = &feature_descriptor_indexing;
+
+		vkGetPhysicalDeviceFeatures2(m_physical_device, &m_physical_device_features2);
+		if (feature_descriptor_indexing.descriptorBindingPartiallyBound != VK_TRUE ||
+			feature_descriptor_indexing.runtimeDescriptorArray != VK_TRUE)
 			return false;*/
+
 		return true;
 	}
 
