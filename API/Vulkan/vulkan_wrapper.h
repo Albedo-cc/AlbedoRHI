@@ -236,7 +236,8 @@ namespace RHI
 
 		virtual void Bind(std::shared_ptr<RHI::CommandBuffer> command_buffer) = 0; // vkCmdDraw ...
 
-		VkPipelineLayout GetPipelineLayout() { return m_pipeline_layout; }
+		VkPipelineLayout& GetPipelineLayout() { return m_pipeline_layout; }
+		VkDescriptorSetLayout& GetDescriptorSetLayout(size_t index) { assert(index < m_descriptor_set_layouts.size()); return m_descriptor_set_layouts[index]; }
 		operator VkPipeline() { return m_pipeline; }
 
 	protected:
@@ -244,7 +245,7 @@ namespace RHI
 		virtual std::vector<VkPushConstantRange>						prepare_push_constant_state()		/* [Optional]: Layout will be reflected automatically*/;
 
 		enum ShaderTypes{vertex_shader, fragment_shader, MAX_SHADER_COUNT};
-		virtual std::array<std::string, MAX_SHADER_COUNT>		prepare_shader_files()		= 0;			// Use ShaderTypes enum
+		virtual std::array<std::string, MAX_SHADER_COUNT>		prepare_shader_files()						= 0; // Use ShaderTypes enum
 		virtual VkPipelineVertexInputStateCreateInfo						prepare_vertex_input_state()			= 0;
 		virtual VkPipelineTessellationStateCreateInfo					prepare_tessellation_state()			/* [Optional]*/;
 		virtual VkPipelineInputAssemblyStateCreateInfo				prepare_input_assembly_state()	= 0;

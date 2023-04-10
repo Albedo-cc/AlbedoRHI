@@ -102,6 +102,8 @@ namespace RHI
 
 	GraphicsPipeline::~GraphicsPipeline()
 	{
+		for (auto& descriptor_set_layout : m_descriptor_set_layouts)
+			vkDestroyDescriptorSetLayout(m_context->m_device, descriptor_set_layout, m_context->m_memory_allocation_callback);
 		vkDestroyPipelineLayout(m_context->m_device, m_pipeline_layout, m_context->m_memory_allocation_callback);
 		vkDestroyPipeline(m_context->m_device, m_pipeline, m_context->m_memory_allocation_callback);
 	}
@@ -112,9 +114,9 @@ namespace RHI
 		// 1. Create Shader Stages & Deduce Pipeline Layout
 		// --------------------------------------------------------------------------------------------------------------------------------//
 		// Descriptor Set Layouts & Push Constants
-		auto descriptor_set_layouts = prepare_descriptor_layouts();
+		m_descriptor_set_layouts = prepare_descriptor_layouts();
 		auto push_constant_state = prepare_push_constant_state();
-		auto descriptor_bindings = descriptor_set_layouts.empty() ? new std::vector<DescriptorBinding>() : nullptr;
+		auto descriptor_bindings = m_descriptor_set_layouts.empty() ? new std::vector<DescriptorBinding>() : nullptr;
 		auto push_constant_ranges = push_constant_state.empty() ? new std::vector<PushConstantRange>() : nullptr;
 
 		// Shaders
@@ -143,7 +145,7 @@ namespace RHI
 					});
 
 			size_t max_set = descriptor_bindings->front().set + 1;
-			descriptor_set_layouts.resize(max_set);
+			m_descriptor_set_layouts.resize(max_set);
 			std::vector<std::vector<VkDescriptorSetLayoutBinding>> descriptorSets(max_set);
 			
 			for (auto& currentBinding : *descriptor_bindings)
@@ -165,22 +167,10 @@ namespace RHI
 				}
 			}
 
-
-			// Debug)))))>>>>>>>>>>>>>>
-			for (auto& set : descriptorSets)
-			{
-				static int cnt = 0;
-				log::debug("\nCurrent Set {}", cnt++);
-				for (auto& binding : set)
-				{
-					log::info("flags {}, count {}, type {}", binding.stageFlags, binding.descriptorCount, binding.descriptorType);
-				}
-			}
-
 			// Create Descriptor Set Layouts
 			for (size_t current_set = 0; current_set < max_set; ++current_set)
 			{
-				auto& descriptor_set_layout = descriptor_set_layouts[current_set];
+				auto& descriptor_set_layout = m_descriptor_set_layouts[current_set];
 				VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo
 				{
 					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -210,8 +200,8 @@ namespace RHI
 		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-			.setLayoutCount = static_cast<uint32_t>(descriptor_set_layouts.size()),
-			.pSetLayouts = descriptor_set_layouts.data(),
+			.setLayoutCount = static_cast<uint32_t>(m_descriptor_set_layouts.size()),
+			.pSetLayouts = m_descriptor_set_layouts.data(),
 			.pushConstantRangeCount = static_cast<uint32_t>(push_constant_state.size()),
 			.pPushConstantRanges = push_constant_state.data()
 		};
