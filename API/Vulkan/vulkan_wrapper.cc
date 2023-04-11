@@ -111,92 +111,37 @@ namespace RHI
 	void GraphicsPipeline::Initialize()
 	{
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		// 1. Create Shader Stages & Deduce Pipeline Layout
+		// 1. Create Shader Stages
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		// Descriptor Set Layouts & Push Constants
-		m_descriptor_set_layouts = prepare_descriptor_layouts();
-		auto push_constant_state = prepare_push_constant_state();
-		auto descriptor_bindings = m_descriptor_set_layouts.empty() ? new std::vector<DescriptorBinding>() : nullptr;
-		auto push_constant_ranges = push_constant_state.empty() ? new std::vector<PushConstantRange>() : nullptr;
-
 		// Shaders
 		std::vector<VkPipelineShaderStageCreateInfo> shaderInfos(MAX_SHADER_COUNT);
 		auto shaders = prepare_shader_files();
 		// Vertex Shader
+		std::vector<char> vertex_shader_buffer;
 		shaderInfos[vertex_shader].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		shaderInfos[vertex_shader].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		shaderInfos[vertex_shader].module = create_shader_module(shaders[vertex_shader], VK_SHADER_STAGE_VERTEX_BIT, descriptor_bindings, nullptr);
+		shaderInfos[vertex_shader].module = create_shader_module(shaders[vertex_shader], vertex_shader_buffer);
 		shaderInfos[vertex_shader].pName = "main";
 		// Fragment Shader
+		std::vector<char> fragment_shader_buffer;
 		shaderInfos[fragment_shader].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		shaderInfos[fragment_shader].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		shaderInfos[fragment_shader].module = create_shader_module(shaders[fragment_shader], VK_SHADER_STAGE_FRAGMENT_BIT, descriptor_bindings, nullptr);
+		shaderInfos[fragment_shader].module = create_shader_module(shaders[fragment_shader], fragment_shader_buffer);
 		shaderInfos[fragment_shader].pName = "main";
-
-		// Deduce Pipeline Layout
-		if (descriptor_bindings && !descriptor_bindings->empty())
-		{
-			if (descriptor_bindings->size() > 1)
-				std::sort(descriptor_bindings->begin(), descriptor_bindings->end(),
-					[](const DescriptorBinding& next, const DescriptorBinding& prev)->bool
-					{
-						if (next.set == prev.set) return next.binding < prev.binding; // Descending Binding Index
-						else return next.set < prev.set; // Descending Set Index
-					});
-
-			size_t max_set = descriptor_bindings->front().set + 1;
-			m_descriptor_set_layouts.resize(max_set);
-			std::vector<std::vector<VkDescriptorSetLayoutBinding>> descriptorSets(max_set);
-			
-			for (auto& currentBinding : *descriptor_bindings)
-			{
-				auto& currentSet = descriptorSets[currentBinding.set];
-				if (currentSet.empty())
-				{
-					currentSet.reserve(currentBinding.binding + 1); // DESC Sorted
-					currentSet.emplace_back(currentBinding);
-				}
-				else
-				{
-					auto& previousBinding = currentSet.back();
-					if (currentBinding.binding == previousBinding.binding)
-					{
-						previousBinding.stageFlags |= currentBinding.stages; // Same binding but different stages.
-					} 
-					else currentSet.emplace_back(currentBinding); // Differernt bindings
-				}
-			}
-
-			// Create Descriptor Set Layouts
-			for (size_t current_set = 0; current_set < max_set; ++current_set)
-			{
-				auto& descriptor_set_layout = m_descriptor_set_layouts[current_set];
-				VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo
-				{
-					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-					.bindingCount = static_cast<uint32_t>(descriptorSets[current_set].size()),
-					.pBindings = descriptorSets[current_set].data()
-				};
-				if (vkCreateDescriptorSetLayout(
-					m_context->m_device,
-					&descriptorSetLayoutCreateInfo,
-					m_context->m_memory_allocation_callback,
-					&descriptor_set_layout) != VK_SUCCESS)
-					throw std::runtime_error("Failed to create the Vulkan Desceriptor Set Layout automatically!");
-			}
-		} // End deduce descriptor set layouts
-
-		if (push_constant_ranges && !push_constant_ranges->empty()) // && >0
-		{
-			//push_constant_state.resize(INTERSECTION)
-		}
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		
+
 
 
 		// --------------------------------------------------------------------------------------------------------------------------------//
 		// 2. Create Pipeline Layout
 		// --------------------------------------------------------------------------------------------------------------------------------//
+		// Descriptor Set Layouts & Push Constants
+		m_descriptor_set_layouts = prepare_descriptor_layouts();
+		auto push_constant_state = prepare_push_constant_state();
+		deduce_pipeline_states_from_shaders(vertex_shader_buffer, fragment_shader_buffer,
+			(m_descriptor_set_layouts.empty() ? &m_descriptor_set_layouts : nullptr),
+			(push_constant_state.empty() ? &push_constant_state : nullptr));
+
 		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -270,9 +215,6 @@ namespace RHI
 		// --------------------------------------------------------------------------------------------------------------------------------//
 		// 4. Free Resource
 		// --------------------------------------------------------------------------------------------------------------------------------//
-		// Deducers
-		delete descriptor_bindings;
-		delete push_constant_ranges;
 		// Shader Modules
 		for (auto& shaderInfo : shaderInfos)
 		{
@@ -290,6 +232,12 @@ namespace RHI
 
 	std::vector<VkPushConstantRange> GraphicsPipeline::
 		prepare_push_constant_state()
+	{
+		return {};
+	}
+
+	VkPipelineVertexInputStateCreateInfo GraphicsPipeline::
+		prepare_vertex_input_state()
 	{
 		return {};
 	}
@@ -350,11 +298,7 @@ namespace RHI
 		};
 	}
 
-	VkShaderModule GraphicsPipeline::create_shader_module(
-		std::string_view shader_file, 
-		VkShaderStageFlags shader_stage, 
-		std::vector<DescriptorBinding>* descriptor_set_layout_bindings,
-		std::vector<PushConstantRange>* push_constants)
+	VkShaderModule GraphicsPipeline::create_shader_module(std::string_view shader_file, std::vector<char>& buffer)
 	{
 		// Check Reload
 		VkShaderModule shader_module{};
@@ -364,7 +308,7 @@ namespace RHI
 		if (!file.is_open()) throw std::runtime_error(std::format("Failed to open the shader file {}!", shader_file));
 
 		size_t file_size = static_cast<size_t>(file.tellg());
-		std::vector<char> buffer(file_size);
+		buffer.resize(file_size);
 
 		file.seekg(0);
 		file.read(buffer.data(), file_size);
@@ -386,65 +330,211 @@ namespace RHI
 			&shader_module) != VK_SUCCESS)
 			throw std::runtime_error(std::format("Failed to create shader module {}!", shader_file));
 
-		if (descriptor_set_layout_bindings || push_constants)
-		{
-			SpvReflectShaderModule spvContext;
-			SpvReflectResult result = spvReflectCreateShaderModule(file_size, buffer.data(), &spvContext);
-			assert(result == SPV_REFLECT_RESULT_SUCCESS);
-			uint32_t count = 0;
+		return shader_module;
+	}
 
-			if (descriptor_set_layout_bindings)
+	void GraphicsPipeline::deduce_pipeline_states_from_shaders(
+		std::vector<char>& vertex_shader,
+		std::vector<char>& fragment_shader,
+		std::vector<VkDescriptorSetLayout>* descriptor_set_layouts,
+		std::vector<VkPushConstantRange>* push_constants)
+	{
+		SpvReflectShaderModule spvContext;
+		std::vector<DescriptorBinding> descriptor_set_layout_bindings;
+		uint32_t count = 0;
+		// 1. Vertex Shader
+		{
+			if (spvReflectCreateShaderModule(vertex_shader.size(), vertex_shader.data(), &spvContext) != SPV_REFLECT_RESULT_SUCCESS)
+				throw std::runtime_error("Failed to reflect vertex shader!");
+
+			if (descriptor_set_layouts)
 			{
 				if (spvReflectEnumerateDescriptorSets(&spvContext, &count, NULL) != SPV_REFLECT_RESULT_SUCCESS)
-					throw std::runtime_error(std::format("Failed to reflect descriptor sets of shader {}!", shader_file));
+					throw std::runtime_error("Failed to reflect descriptor sets of vertex shader!");
 
-				SpvReflectDescriptorSet** pDescriptorSets = new SpvReflectDescriptorSet * [count];
-				spvReflectEnumerateDescriptorSets(&spvContext, &count, pDescriptorSets);
+				std::vector<SpvReflectDescriptorSet*> pDescriptorSets(count);
+				if (spvReflectEnumerateDescriptorSets(&spvContext, &count, pDescriptorSets.data()) != SPV_REFLECT_RESULT_SUCCESS)
+					throw std::runtime_error("Failed to enumerate descriptor sets of vertex shader!");
 
-				for (uint32_t i = 0; i < count; ++i)
+				for(const auto& descriptorSets : pDescriptorSets)
 				{
-					DescriptorBinding descriptorBinding{ .set = pDescriptorSets[i]->set, .stages = shader_stage };
-					
-					log::debug("Set {} Bindings {}", pDescriptorSets[i]->set, pDescriptorSets[i]->binding_count);
-					auto& bindings = pDescriptorSets[i]->bindings;
-					for (uint32_t j = 0; j < pDescriptorSets[i]->binding_count; ++j)
+					DescriptorBinding descriptorBinding{ .set = descriptorSets->set, .stages = VK_SHADER_STAGE_VERTEX_BIT };
+
+					log::debug("Set {} Bindings {}", descriptorSets->set, descriptorSets->binding_count);
+					auto& bindings = descriptorSets->bindings;
+					for (uint32_t i = 0; i < descriptorSets->binding_count; ++i)
 					{
-						descriptorBinding.binding = bindings[j]->binding;
-						descriptorBinding.count = bindings[j]->count;
-						descriptorBinding.type = static_cast<VkDescriptorType>(bindings[j]->descriptor_type);
-						log::debug("binding {}, name {}, count {}", bindings[j]->binding, bindings[j]->name, bindings[j]->count);
+						descriptorBinding.binding = bindings[i]->binding;
+						descriptorBinding.count = bindings[i]->count;
+						descriptorBinding.type = static_cast<VkDescriptorType>(bindings[i]->descriptor_type);
+						log::debug("binding {}, name {}, count {}", bindings[i]->binding, bindings[i]->name, bindings[i]->count);
 					}
-					descriptor_set_layout_bindings->emplace_back(descriptorBinding);
+					descriptor_set_layout_bindings.emplace_back(descriptorBinding);
 				}
-				delete[] pDescriptorSets;
-			}
+			} // End deduce Descriptor Sets
 
 			if (push_constants)
 			{
 				if (spvReflectEnumeratePushConstants(&spvContext, &count, NULL) != SPV_REFLECT_RESULT_SUCCESS)
-					throw std::runtime_error(std::format("Failed to reflect push constants of shader {}!", shader_file));
+					throw std::runtime_error("Failed to reflect push constants of vertex shader!");
 
-				SpvReflectBlockVariable** pPushConstants = new SpvReflectBlockVariable * [count];
-				spvReflectEnumeratePushConstants(&spvContext, &count, NULL);
+				std::vector<SpvReflectBlockVariable*> pPushConstants(count);
+				if (spvReflectEnumeratePushConstants(&spvContext, &count, pPushConstants.data()) != SPV_REFLECT_RESULT_SUCCESS)
+					throw std::runtime_error("Failed to reflect enumerate constants of vertex shader!");
 
-				for (uint32_t i = 0; i < count; ++i)
+				for(const auto& pushConstant : pPushConstants)
 				{
-					log::debug("Push Constant: offset {}, size {}", pPushConstants[i]->offset, pPushConstants[i]->size);
+					log::debug("Push Constant: offset {}, size {}", pushConstant->offset, pushConstant->size);
 					push_constants->emplace_back(
-						PushConstantRange
+						VkPushConstantRange
 						{
-							.stages = shader_stage,
-							.offset = pPushConstants[i]->offset,
-							.size = pPushConstants[i]->size
+							.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+							.offset = pushConstant->offset,
+							.size = pushConstant->size
 						});
 				}
-				delete[] pPushConstants;
-			}
+			} // End deduce Push Constants
 
 			spvReflectDestroyShaderModule(&spvContext);
-		}
+		} // End parse Vertex Shader
+		
 
-		return shader_module;
+
+		// 2. Fragment Shader
+		{
+			if (spvReflectCreateShaderModule(fragment_shader.size(), fragment_shader.data(), &spvContext) != SPV_REFLECT_RESULT_SUCCESS)
+				throw std::runtime_error("Failed to reflect fragment shader!");
+
+			if (descriptor_set_layouts)
+			{
+				if (spvReflectEnumerateDescriptorSets(&spvContext, &count, NULL) != SPV_REFLECT_RESULT_SUCCESS)
+					throw std::runtime_error("Failed to reflect descriptor sets of fragment shader!");
+
+				std::vector<SpvReflectDescriptorSet*> pDescriptorSets(count);
+				if (spvReflectEnumerateDescriptorSets(&spvContext, &count, pDescriptorSets.data()) != SPV_REFLECT_RESULT_SUCCESS)
+					throw std::runtime_error("Failed to enumerate descriptor sets of fragment shader!");
+
+				for (const auto& descriptorSets : pDescriptorSets)
+				{
+					DescriptorBinding descriptorBinding{ .set = descriptorSets->set, .stages = VK_SHADER_STAGE_FRAGMENT_BIT };
+
+					log::debug("Set {} Bindings {}", descriptorSets->set, descriptorSets->binding_count);
+					auto& bindings = descriptorSets->bindings;
+					for (uint32_t i = 0; i < descriptorSets->binding_count; ++i)
+					{
+						descriptorBinding.binding = bindings[i]->binding;
+						descriptorBinding.count = bindings[i]->count;
+						descriptorBinding.type = static_cast<VkDescriptorType>(bindings[i]->descriptor_type);
+						log::debug("binding {}, name {}, count {}", bindings[i]->binding, bindings[i]->name, bindings[i]->count);
+					}
+					descriptor_set_layout_bindings.emplace_back(descriptorBinding);
+				}
+			} // End deduce Descriptor Sets
+
+			if (push_constants)
+			{
+				if (spvReflectEnumeratePushConstants(&spvContext, &count, NULL) != SPV_REFLECT_RESULT_SUCCESS)
+					throw std::runtime_error("Failed to reflect push constants of vertex shader!");
+
+				std::vector<SpvReflectBlockVariable*> pPushConstants(count);
+				if (spvReflectEnumeratePushConstants(&spvContext, &count, pPushConstants.data()) != SPV_REFLECT_RESULT_SUCCESS)
+					throw std::runtime_error("Failed to reflect enumerate constants of vertex shader!");
+
+				for (const auto& pushConstant : pPushConstants)
+				{
+					log::debug("Push Constant: offset {}, size {}", pushConstant->offset, pushConstant->size);
+					push_constants->emplace_back(
+						VkPushConstantRange
+						{
+							.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+							.offset = pushConstant->offset,
+							.size = pushConstant->size
+						});
+				}
+			} // End deduce Push Constants
+
+			spvReflectDestroyShaderModule(&spvContext);
+		} // End parse Fragment Shader
+
+
+
+		// Final. Create Resource
+		if (descriptor_set_layouts && !descriptor_set_layout_bindings.empty())
+		{
+			if (descriptor_set_layout_bindings.size() > 1)
+				std::sort(descriptor_set_layout_bindings.begin(), descriptor_set_layout_bindings.end(),
+					[](const DescriptorBinding& next, const DescriptorBinding& prev)->bool
+					{
+						if (next.set == prev.set) return next.binding < prev.binding; // Descending Binding Index
+						else return next.set < prev.set; // Descending Set Index
+					});
+
+			size_t max_set = descriptor_set_layout_bindings.front().set + 1;
+			descriptor_set_layouts->resize(max_set);
+			std::vector<std::vector<VkDescriptorSetLayoutBinding>> descriptorSets(max_set);
+
+			for (auto& currentBinding : descriptor_set_layout_bindings)
+			{
+				auto& currentSet = descriptorSets[currentBinding.set];
+				if (currentSet.empty())
+				{
+					currentSet.reserve(currentBinding.binding + 1); // DESC Sorted
+					currentSet.emplace_back(currentBinding);
+				}
+				else
+				{
+					auto& previousBinding = currentSet.back();
+					if (currentBinding.binding == previousBinding.binding)
+					{
+						previousBinding.stageFlags |= currentBinding.stages; // Same binding but different stages.
+					}
+					else currentSet.emplace_back(currentBinding); // Differernt bindings
+				}
+			}
+			// Create Descriptor Set Layouts
+			for (size_t current_set = 0; current_set < max_set; ++current_set)
+			{
+				auto& descriptor_set_layout = m_descriptor_set_layouts[current_set];
+				VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo
+				{
+					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+					.bindingCount = static_cast<uint32_t>(descriptorSets[current_set].size()),
+					.pBindings = descriptorSets[current_set].data()
+				};
+				if (vkCreateDescriptorSetLayout(
+					m_context->m_device,
+					&descriptorSetLayoutCreateInfo,
+					m_context->m_memory_allocation_callback,
+					&descriptor_set_layout) != VK_SUCCESS)
+					throw std::runtime_error("Failed to create the Vulkan Desceriptor Set Layout automatically!");
+			}
+		} // End create Descriptor Set Layouts
+		
+		if (push_constants && !push_constants->empty())
+		{
+			if (push_constants->size() > 1)
+				std::sort(push_constants->begin(), push_constants->end(),
+					[](const VkPushConstantRange& next, const VkPushConstantRange& prev)->bool
+					{
+						if (next.offset == prev.offset) return next.size < prev.size; // Descending Range Size
+						else return next.offset < prev.offset; // Descending Range Offset
+					});
+
+			std::vector<VkPushConstantRange> pushConstants{ push_constants->front() };
+			for (size_t i = 1; i < push_constants->size(); ++i)
+			{
+				auto& prevPushConstant = (*push_constants)[i - 1];
+				auto& curPushConstant = (*push_constants)[i];
+				if (curPushConstant.offset == prevPushConstant.offset &&
+					curPushConstant.size == prevPushConstant.size)
+				{
+					prevPushConstant.stageFlags |= curPushConstant.stageFlags; // Same PushConstant but different stages.
+				}
+				else pushConstants.emplace_back(curPushConstant); // Differernt PushConstants
+			}
+			push_constants->swap(pushConstants);
+		} // End arrange Descriptor Set Layouts
+
 	}
 
 	CommandBuffer::CommandBuffer(std::shared_ptr<CommandPool> parent, VkCommandBufferLevel level) :

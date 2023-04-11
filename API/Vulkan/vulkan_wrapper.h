@@ -18,9 +18,7 @@ namespace RHI
 
 	class DescriptorPool;		// Factory
 	class DescriptorSet;
-
 	class DescriptorBinding;
-	class PushConstantRange;
 
 	class Sampler;
 
@@ -201,33 +199,6 @@ namespace RHI
 		};
 	};
 
-	class PushConstantRange
-	{
-	public:
-		VkShaderStageFlags    stages;
-		uint32_t              offset;
-		uint32_t              size;
-
-		operator VkPushConstantRange() const
-		{
-			return VkPushConstantRange
-			{
-				.stageFlags = stages,
-				.offset = offset,
-				.size = size
-			};
-		}
-
-		struct Hash
-		{
-			uint64_t operator()(const PushConstantRange& push_constant_range)
-			{
-				uint64_t hash{ push_constant_range.offset };
-				return hash << 32 | push_constant_range.size;
-			}
-		};
-	};
-
 	class GraphicsPipeline
 	{
 	public:
@@ -246,7 +217,7 @@ namespace RHI
 
 		enum ShaderTypes{vertex_shader, fragment_shader, MAX_SHADER_COUNT};
 		virtual std::array<std::string, MAX_SHADER_COUNT>		prepare_shader_files()						= 0; // Use ShaderTypes enum
-		virtual VkPipelineVertexInputStateCreateInfo						prepare_vertex_input_state()			= 0;
+		virtual VkPipelineVertexInputStateCreateInfo						prepare_vertex_input_state()			/* [Optional]: Layout will be reflected automatically*/;
 		virtual VkPipelineTessellationStateCreateInfo					prepare_tessellation_state()			/* [Optional]*/;
 		virtual VkPipelineInputAssemblyStateCreateInfo				prepare_input_assembly_state()	= 0;
 		virtual VkPipelineViewportStateCreateInfo							prepare_viewport_state()				= 0; // m_viewports & m_scissors
@@ -264,9 +235,7 @@ namespace RHI
 		virtual ~GraphicsPipeline() noexcept;
 
 	protected:
-		VkShaderModule	create_shader_module(std::string_view shader_file, VkShaderStageFlags shader_stage,
-										std::vector<DescriptorBinding>* descriptor_set_layout_bindings,
-										std::vector<PushConstantRange>* push_constants);
+		VkShaderModule	create_shader_module(std::string_view shader_file, std::vector<char>& buffer);
 
 	protected:
 		std::shared_ptr<RHI::VulkanContext> m_context;
@@ -281,6 +250,13 @@ namespace RHI
 		std::vector<VkViewport>		m_viewports;
 		std::vector<VkRect2D>		m_scissors;
 		std::vector<VkDescriptorSetLayout> m_descriptor_set_layouts;
+
+	private:
+		void deduce_pipeline_states_from_shaders(
+			std::vector<char>& vertex_shader, 
+			std::vector<char>& fragment_shader,
+			std::vector<VkDescriptorSetLayout>* descriptor_set_layouts, 
+			std::vector<VkPushConstantRange>* push_constants);
 	};
 
 	class DescriptorSet
