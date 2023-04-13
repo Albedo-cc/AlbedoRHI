@@ -97,7 +97,7 @@ namespace RHI
 
 	public:
 		// Create Vulkan Context
-		static std::shared_ptr<VulkanContext>		Create(GLFWwindow* window); // Create Vulkan Context
+		static std::shared_ptr<VulkanContext>	 Create(GLFWwindow* window); // Create Vulkan Context
 
 		// Products
 		std::weak_ptr<VulkanContext>			CreateVulkanContextView() { return shared_from_this(); }

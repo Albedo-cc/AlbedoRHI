@@ -368,8 +368,8 @@ namespace RHI
 						descriptorBinding.count = bindings[i]->count;
 						descriptorBinding.type = static_cast<VkDescriptorType>(bindings[i]->descriptor_type);
 						log::debug("binding {}, name {}, count {}", bindings[i]->binding, bindings[i]->name, bindings[i]->count);
+						descriptor_set_layout_bindings.emplace_back(descriptorBinding);
 					}
-					descriptor_set_layout_bindings.emplace_back(descriptorBinding);
 				}
 			} // End deduce Descriptor Sets
 
@@ -426,8 +426,8 @@ namespace RHI
 						descriptorBinding.count = bindings[i]->count;
 						descriptorBinding.type = static_cast<VkDescriptorType>(bindings[i]->descriptor_type);
 						log::debug("binding {}, name {}, count {}", bindings[i]->binding, bindings[i]->name, bindings[i]->count);
+						descriptor_set_layout_bindings.emplace_back(descriptorBinding);
 					}
-					descriptor_set_layout_bindings.emplace_back(descriptorBinding);
 				}
 			} // End deduce Descriptor Sets
 
@@ -463,10 +463,10 @@ namespace RHI
 		{
 			if (descriptor_set_layout_bindings.size() > 1)
 				std::sort(descriptor_set_layout_bindings.begin(), descriptor_set_layout_bindings.end(),
-					[](const DescriptorBinding& next, const DescriptorBinding& prev)->bool
+					[](const DescriptorBinding& prev, const DescriptorBinding& next)->bool
 					{
-						if (next.set == prev.set) return next.binding < prev.binding; // Descending Binding Index
-						else return next.set < prev.set; // Descending Set Index
+						if (next.set != prev.set) return next.set < prev.set; // Descending Set Index
+						else return next.binding < prev.binding; // Descending Binding Index
 					});
 
 			size_t max_set = descriptor_set_layout_bindings.front().set + 1;
@@ -547,7 +547,7 @@ namespace RHI
 	{
 		assert(!IsRecording() && "You cannot Begin() a recording Vulkan Command Buffer!");
 
-		vkResetCommandBuffer(m_command_buffer, 0);
+		vkResetCommandBuffer(command_buffer, 0);
 
 		VkCommandBufferBeginInfo commandBufferBeginInfo
 		{
@@ -555,7 +555,7 @@ namespace RHI
 			.flags = 0,
 			.pInheritanceInfo = inheritanceInfo
 		};
-		if (vkBeginCommandBuffer(m_command_buffer, &commandBufferBeginInfo) != VK_SUCCESS)
+		if (vkBeginCommandBuffer(command_buffer, &commandBufferBeginInfo) != VK_SUCCESS)
 			throw std::runtime_error("Failed to begin the Vulkan Command Buffer!");
 
 		m_is_recording = true;
@@ -564,7 +564,7 @@ namespace RHI
 	void CommandBufferReset::End()
 	{
 		assert(IsRecording() && "You cannot End() an idle Vulkan Command Buffer!");
-		if (vkEndCommandBuffer(m_command_buffer) != VK_SUCCESS)
+		if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS)
 			throw std::runtime_error("Failed to end the Vulkan Command Buffer!");
 		m_is_recording = false;
 	}
@@ -584,7 +584,7 @@ namespace RHI
 			.pWaitSemaphores = wait_semaphores.data(),
 			.pWaitDstStageMask = &which_pipeline_stages_to_wait,
 			.commandBufferCount = 1,
-			.pCommandBuffers = &m_command_buffer,
+			.pCommandBuffers = &command_buffer,
 			.signalSemaphoreCount = static_cast<uint32_t>(signal_semaphores.size()),
 			.pSignalSemaphores = signal_semaphores.data()
 		};
@@ -605,7 +605,7 @@ namespace RHI
 			.flags = 0,
 			.pInheritanceInfo = inheritanceInfo
 		};
-		if (vkBeginCommandBuffer(m_command_buffer, &commandBufferBeginInfo) != VK_SUCCESS)
+		if (vkBeginCommandBuffer(command_buffer, &commandBufferBeginInfo) != VK_SUCCESS)
 			throw std::runtime_error("Failed to begin the Vulkan Command Buffer!");
 
 		m_is_recording = true;
@@ -614,7 +614,7 @@ namespace RHI
 	void CommandBufferOneTime::End()
 	{
 		assert(IsRecording() && "You cannot End() an idle Vulkan Command Buffer!");
-		if (vkEndCommandBuffer(m_command_buffer) != VK_SUCCESS)
+		if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS)
 			throw std::runtime_error("Failed to end the Vulkan Command Buffer!");
 		m_is_recording = false;
 	}
@@ -634,7 +634,7 @@ namespace RHI
 			.pWaitSemaphores = wait_semaphores.data(),
 			.pWaitDstStageMask = &which_pipeline_stages_to_wait,
 			.commandBufferCount = 1,
-			.pCommandBuffers = &m_command_buffer,
+			.pCommandBuffers = &command_buffer,
 			.signalSemaphoreCount = static_cast<uint32_t>(signal_semaphores.size()),
 			.pSignalSemaphores = signal_semaphores.data()
 		};
@@ -644,7 +644,7 @@ namespace RHI
 			throw std::runtime_error("Failed to submit the Vulkan Command Buffer!");
 		if (wait_queue_idle) vkQueueWaitIdle(submit_queue);
 
-		vkFreeCommandBuffers(m_parent->m_context->m_device, *m_parent, 1, &m_command_buffer);
+		vkFreeCommandBuffers(m_parent->m_context->m_device, *m_parent, 1, &command_buffer);
 	}
 
 	CommandPool::CommandPool(
@@ -701,7 +701,7 @@ namespace RHI
 		if (vkAllocateCommandBuffers(
 			m_context->m_device, 
 			&commandBufferAllocateInfo, 
-			&commandbuffer->m_command_buffer) != VK_SUCCESS)
+			&commandbuffer->command_buffer) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Command Buffer!");
 
 		return commandbuffer;
@@ -776,7 +776,7 @@ namespace RHI
 		{
 			.buffer = *data,
 			.offset = 0,
-			.range = data->Size()
+			.range = VK_WHOLE_SIZE // data->Size()
 		};
 
 		VkWriteDescriptorSet writeDescriptorSet
@@ -819,6 +819,38 @@ namespace RHI
 		};
 
 		vkUpdateDescriptorSets(m_parent->m_context->m_device, 1, &writeDescriptorSet, 0, nullptr);
+	}
+
+	void DescriptorSet::WriteImages(VkDescriptorType image_type, std::vector<std::shared_ptr<VMA::Image>> data, uint32_t offset/* = 0*/)
+	{
+		std::vector<VkDescriptorImageInfo> descriptorImageInfos(data.size());
+		std::vector<VkWriteDescriptorSet> writeDescriptorSets(data.size());
+
+		for (uint32_t i = 0; i < data.size(); ++i)
+		{
+			assert(data[i]->GetImageSampler() != VK_NULL_HANDLE && "Cannot write the image without a sampler!");
+
+			descriptorImageInfos[i] = VkDescriptorImageInfo
+			{
+				.sampler = data[i]->GetImageSampler(),
+				.imageView = data[i]->GetImageView(),
+				.imageLayout = data[i]->GetImageLayout()
+			};
+
+			writeDescriptorSets[i] = VkWriteDescriptorSet
+			{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = m_descriptor_set,
+				.dstBinding = i + offset,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = image_type,
+				.pImageInfo = &descriptorImageInfos[i],
+				.pBufferInfo = nullptr,
+				.pTexelBufferView = nullptr
+			};
+		}
+		vkUpdateDescriptorSets(m_parent->m_context->m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, nullptr);
 	}
 
 	Sampler::Sampler(std::shared_ptr<RHI::VulkanContext> vulkan_context,

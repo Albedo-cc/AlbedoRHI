@@ -40,7 +40,8 @@ namespace RHI
 		public:
 			void		Write(void* data);	// The buffer must be mapping-allowed and writable
 			void*	Access();				// If the buffer is persistently mapped, you can access its memory directly
-			VkBufferCopy GetCopyInfo(VkDeviceSize size = 0/*ALL*/, VkDeviceSize offset_src = 0, VkDeviceSize offset_dst = 0);
+			void		Copy(std::shared_ptr<Buffer> destination, VkDeviceSize size = 0/*ALL*/, VkDeviceSize offset_src = 0, VkDeviceSize offset_dst = 0);
+			void		CopyCommand(std::shared_ptr<CommandBuffer> commandBuffer, std::shared_ptr<Buffer> destination, VkDeviceSize size = 0/*ALL*/, VkDeviceSize offset_src = 0, VkDeviceSize offset_dst = 0);
 			VkDeviceSize Size();
 
 		public:
@@ -60,8 +61,8 @@ namespace RHI
 		{
 			friend class VulkanMemoryAllocator;
 		public:
-			void Write(void* data);
-			void WriteCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, void* data);
+			void Write(std::shared_ptr<Buffer> data); // Write from Staging Buffer
+			void WriteCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, std::shared_ptr<Buffer> data); // Write from Staging Buffer
 			void BindSampler(std::shared_ptr<RHI::Sampler> sampler);
 
 			void TransitionLayout(VkImageLayout target_layout);

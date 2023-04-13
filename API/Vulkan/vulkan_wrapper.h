@@ -64,7 +64,7 @@ namespace RHI
 
 		VkCommandBufferLevel GetLevel() const { return m_level; }
 		bool IsRecording() const { return m_is_recording; }
-		operator VkCommandBuffer() { return m_command_buffer; }
+		operator VkCommandBuffer() { return command_buffer; }
 
 	public:
 		CommandBuffer() = delete;
@@ -73,7 +73,7 @@ namespace RHI
 
 	protected:
 		std::shared_ptr<CommandPool> m_parent;
-		VkCommandBuffer m_command_buffer = VK_NULL_HANDLE;
+		VkCommandBuffer command_buffer = VK_NULL_HANDLE;
 		VkCommandBufferLevel m_level;
 		bool m_is_recording = false;
 
@@ -208,6 +208,7 @@ namespace RHI
 		virtual void Bind(std::shared_ptr<RHI::CommandBuffer> command_buffer) = 0; // vkCmdDraw ...
 
 		VkPipelineLayout& GetPipelineLayout() { return m_pipeline_layout; }
+		VkPipelineBindPoint GetPipelineBindPoint() const { return VK_PIPELINE_BIND_POINT_GRAPHICS; }
 		VkDescriptorSetLayout& GetDescriptorSetLayout(size_t index) { assert(index < m_descriptor_set_layouts.size()); return m_descriptor_set_layouts[index]; }
 		operator VkPipeline() { return m_pipeline; }
 
@@ -265,6 +266,7 @@ namespace RHI
 	public:
 		void WriteBuffer(VkDescriptorType buffer_type, uint32_t buffer_binding, std::shared_ptr<VMA::Buffer> data);
 		void WriteImage(VkDescriptorType image_type, uint32_t image_binding, std::shared_ptr<VMA::Image> data);
+		void WriteImages(VkDescriptorType image_type, std::vector<std::shared_ptr<VMA::Image>> data, uint32_t offset = 0);
 
 		VkDescriptorSetLayout& GetDescriptorSetLayout() { return descriptor_set_layout; }
 

@@ -102,15 +102,33 @@ namespace RHI
 		return m_allocation->GetMappedData();
 	}
 
-	VkBufferCopy VMA::Buffer::
-		GetCopyInfo(VkDeviceSize size /* = ALL*/, VkDeviceSize offset_src/* = 0*/, VkDeviceSize offset_dst/* = 0*/)
+	void VMA::Buffer::Copy(std::shared_ptr<Buffer> destination, 
+		VkDeviceSize size /* = ALL*/, VkDeviceSize offset_src/* = 0*/, VkDeviceSize offset_dst/* = 0*/)
 	{
-		return VkBufferCopy
+		auto commandBuffer = m_parent->m_context->GetOneTimeCommandBuffer();
+		commandBuffer->Begin();
+		CopyCommand(commandBuffer, destination, size, offset_src, offset_dst);
+		commandBuffer->End();
+		commandBuffer->Submit(true); // Must wait for transfer operation
+	}
+
+	void VMA::Buffer::CopyCommand(
+		std::shared_ptr<CommandBuffer> commandBuffer, 
+		std::shared_ptr<Buffer> destination,
+		VkDeviceSize size /* = ALL*/, VkDeviceSize offset_src/* = 0*/, VkDeviceSize offset_dst/* = 0*/)
+	{
+		assert(commandBuffer->IsRecording() &&
+			"You have to ensure that the command buffer is recording while using XXXCommand funcitons!");
+		size = size ? size : Size();
+		assert(size <= (destination->Size() - offset_dst) && "You cannot copy data to another small buffer!");
+		VkBufferCopy bufferCopy
 		{
 			.srcOffset = offset_src,
 			.dstOffset = offset_dst,
 			.size = size ? size : Size()
 		};
+
+		vkCmdCopyBuffer(*commandBuffer, m_buffer, *destination, 1, &bufferCopy);
 	}
 
 	VkDeviceSize VMA::Buffer::Size()
@@ -198,49 +216,24 @@ namespace RHI
 		vkDestroyImageView(m_parent->m_context->m_device, m_image_view, m_parent->m_context->m_memory_allocation_callback);
 	}
 
-	void VMA::Image::Write(void* data)
+	void VMA::Image::Write(std::shared_ptr<RHI::VMA::Buffer> data)
 	{
-		// Staging Buffer
-		size_t image_size = static_cast<size_t>(m_image_width) * m_image_height * 4;
-		auto staging_buffer = m_parent->AllocateStagingBuffer(image_size);  // May not equal to Image Memory Size
-
-		if (m_image_channel != 4) log::warn("Writing a {} channels image, but automatically treating it as 4 channels", m_image_channel);
-		staging_buffer->Write(data);
-
-		// Copy buffer to image requires the image to be in the right layout first
-		VkBufferImageCopy copyRegion
-		{
-			.bufferOffset = 0,
-			.bufferRowLength = 0,
-			.bufferImageHeight = 0,
-			.imageSubresource
-			{
-				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-				.mipLevel = 0,
-				.baseArrayLayer = 0,
-				.layerCount = 1,
-			},
-			.imageOffset = {0,0,0},
-			.imageExtent = {m_image_width, m_image_height, 1}
-		};
-
 		auto commandBuffer = m_parent->m_context->GetOneTimeCommandBuffer();
 		commandBuffer->Begin();
-		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-		vkCmdCopyBufferToImage(*commandBuffer, *staging_buffer, m_image, m_image_layout, 1, &copyRegion);
-		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		WriteCommand(commandBuffer, data);
 		commandBuffer->End();
 		commandBuffer->Submit(true); // Must wait for transfer operation
 	}
 
-	void VMA::Image::WriteCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, void* data)
+	void VMA::Image::WriteCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, std::shared_ptr<VMA::Buffer> data)
 	{
+		assert(commandBuffer->IsRecording() &&
+			"You have to ensure that the command buffer is recording while using XXXCommand funcitons!");
+		assert(data->Size() <= Size() && "It is not recommanded to write the image from a bigger buffer!");
+		if (m_image_channel != 4) log::warn("Writing a {} channels image, but automatically treating it as 4 channels", m_image_channel);
+
 		// Staging Buffer
 		size_t image_size = static_cast<size_t>(m_image_width) * m_image_height * 4;
-		auto staging_buffer = m_parent->AllocateStagingBuffer(image_size);  // May not equal to Image Memory Size
-
-		if (m_image_channel != 4) log::warn("Writing a {} channels image, but automatically treating it as 4 channels", m_image_channel);
-		staging_buffer->Write(data);
 
 		// Copy buffer to image requires the image to be in the right layout first
 		VkBufferImageCopy copyRegion
@@ -259,7 +252,9 @@ namespace RHI
 			.imageExtent = {m_image_width, m_image_height, 1}
 		};
 
-		vkCmdCopyBufferToImage(*commandBuffer, *staging_buffer, m_image, m_image_layout, 1, &copyRegion);
+		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		vkCmdCopyBufferToImage(*commandBuffer, *data, m_image, m_image_layout, 1, &copyRegion);
+		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	}
 
 	void VMA::Image::BindSampler(std::shared_ptr<RHI::Sampler> sampler)
