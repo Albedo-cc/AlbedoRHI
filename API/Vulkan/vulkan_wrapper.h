@@ -25,6 +25,8 @@ namespace RHI
 	class Semaphore;	// Add order between queue operations (same queue or different queues) on the GPU
 	class Fence;				// order the execution on the CPU
 
+	using QueueFamilyIndex = std::optional<uint32_t>;
+
 	// Implementation
 	class CommandPool : public std::enable_shared_from_this<CommandPool>
 	{
@@ -37,7 +39,7 @@ namespace RHI
 	public:
 		CommandPool() = delete;
 		CommandPool(std::shared_ptr<VulkanContext> vulkan_context,
-									uint32_t submit_queue_family_index,
+									QueueFamilyIndex& submit_queue_family_index,
 									VkCommandPoolCreateFlags command_pool_flags);
 		~CommandPool();
 
@@ -140,8 +142,8 @@ namespace RHI
 		virtual void create_framebuffers() = 0;
 		virtual void create_pipelines() = 0;
 
-		virtual std::vector<VkClearValue>	set_attachment_clear_colors() = 0; // Note that the order of clearValues should be identical to the order of your attachments.
-		virtual VkRect2D								set_render_area()							/*[Optional]*/;
+		virtual std::vector<VkClearValue>	set_attachment_clear_colors() = 0;	// Note that the order of clearValues should be identical to the order of your attachments.
+		virtual VkRect2D								set_render_area()									/*[Optional]*/;
 
 	protected:
 		std::shared_ptr<RHI::VulkanContext> m_context;
@@ -268,7 +270,7 @@ namespace RHI
 		void WriteImage(VkDescriptorType image_type, uint32_t image_binding, std::shared_ptr<VMA::Image> data);
 		void WriteImages(VkDescriptorType image_type, std::vector<std::shared_ptr<VMA::Image>> data, uint32_t offset = 0);
 
-		VkDescriptorSetLayout& GetDescriptorSetLayout() { return descriptor_set_layout; }
+		VkDescriptorSetLayout& GetDescriptorSetLayout() { return m_descriptor_set_layout; }
 
 	public:
 		DescriptorSet() = delete;
@@ -279,14 +281,14 @@ namespace RHI
 	private:
 		std::shared_ptr<DescriptorPool> m_parent;
 		VkDescriptorSet m_descriptor_set = VK_NULL_HANDLE;
-		VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
+		VkDescriptorSetLayout m_descriptor_set_layout = VK_NULL_HANDLE;
 	};
 
 	class DescriptorPool : public std::enable_shared_from_this<DescriptorPool>
 	{
 		friend class DescriptorSet;
 	public:
-		std::shared_ptr<DescriptorSet> AllocateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings);
+		std::shared_ptr<DescriptorSet> AllocateDescriptorSet(const std::vector<VkDescriptorSetLayoutBinding>& descriptor_bindings);
 
 	public:
 		DescriptorPool() = delete;

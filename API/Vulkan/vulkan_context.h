@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 #include <AlbedoLog.hpp>
@@ -32,11 +32,11 @@ namespace RHI
 		std::optional<VkPhysicalDeviceFeatures2> m_physical_device_features2;	// Future: Enable Bindless
 
 		VkDevice									m_device										= VK_NULL_HANDLE;
-		std::optional<uint32_t>			m_device_queue_graphics;
-		std::optional<uint32_t>			m_device_queue_present;
-		std::optional<uint32_t>			m_device_queue_compute;
-		std::optional<uint32_t>			m_device_queue_transfer;
-		std::optional<uint32_t>			m_device_queue_sparsebinding;
+		QueueFamilyIndex					m_device_queue_family_graphics;
+		QueueFamilyIndex					m_device_queue_family_present;
+		QueueFamilyIndex					m_device_queue_family_compute;
+		QueueFamilyIndex					m_device_queue_family_transfer;
+		QueueFamilyIndex					m_device_queue_family_sparsebinding;
 
 		std::shared_ptr<VMA>				m_memory_allocator;
 		VkAllocationCallbacks*			m_memory_allocation_callback = VK_NULL_HANDLE;
@@ -60,10 +60,10 @@ namespace RHI
 		VkDebugUtilsMessengerEXT	m_debug_messenger					= VK_NULL_HANDLE;
 
 	private:
-		std::vector<std::pair<std::optional<uint32_t>*, std::vector<float>>> 
+		std::vector<std::pair<QueueFamilyIndex*, std::vector<float>>>
 			m_required_queue_families_with_priorities{
-				{&m_device_queue_graphics,		{1.0f}},
-				{&m_device_queue_present,		{1.0f }}};
+				{&m_device_queue_family_graphics,		{1.0f}},
+				{&m_device_queue_family_present,		{1.0f }}};
 
 		std::vector<VkPresentModeKHR> m_surface_present_modes;
 		std::vector<VkSurfaceFormatKHR> m_surface_formats; // 1.VK_FORMAT_X 2. VK_COLOR_SPACE_X
@@ -85,27 +85,24 @@ namespace RHI
 	public:
 		void WaitDeviceIdle() { vkDeviceWaitIdle(m_device); }		
 
-		std::shared_ptr<CommandBuffer> GetOneTimeCommandBuffer();
-		VkQueue GetQueue(uint32_t queue_family_index, uint32_t queue_index = 0) { VkQueue res; vkGetDeviceQueue(m_device, queue_family_index, queue_index, &res); return res; }
+		VkQueue GetQueue(QueueFamilyIndex& queue_family_index, uint32_t queue_index = 0) { VkQueue res; vkGetDeviceQueue(m_device, queue_family_index.value(), queue_index, &res); return res; }
 
 		// Swapchain Functions (throw swapchain_error means recreation)
 		void NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence,
 			uint64_t timeout = std::numeric_limits<uint64_t>::max()) throw (swapchain_error);
-		void PresentSwapChain(std::vector<VkSemaphore> wait_semaphores) throw (swapchain_error);
-		void PresentSwapChain(VkSemaphore wait_semaphore) throw (swapchain_error);
+		void PresentSwapChain(const std::vector<VkSemaphore>& wait_semaphore) throw (swapchain_error);
 		void RecreateSwapChain();
 
 	public:
-		// Create Vulkan Context
 		static std::shared_ptr<VulkanContext>	 Create(GLFWwindow* window); // Create Vulkan Context
 
-		// Products
+		// Common Products (Command Buffers and Descriptor Sets are created from Global Pools with Lazy Creation)
 		std::weak_ptr<VulkanContext>			CreateVulkanContextView() { return shared_from_this(); }
 
-		std::shared_ptr<CommandPool>		CreateCommandPool(	uint32_t submit_queue_family_index,
-																												VkCommandPoolCreateFlags command_pool_flags);
+		std::shared_ptr<CommandBuffer>	CreateOneTimeCommandBuffer(QueueFamilyIndex& submit_queue_family_index, bool primary = true, std::thread::id thread_id = std::this_thread::get_id());
+		std::shared_ptr<CommandBuffer>	CreateResetableCommandBuffer(QueueFamilyIndex& submit_queue_family_index, bool primary = true, std::thread::id thread_id = std::this_thread::get_id());
 
-		std::shared_ptr<DescriptorPool>		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
+		std::shared_ptr<DescriptorSet>			CreateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings, std::thread::id thread_id = std::this_thread::get_id());
 
 		std::shared_ptr<Sampler>					CreateSampler(VkSamplerAddressMode address_mode,
 																									VkBorderColor border_color = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
@@ -114,6 +111,27 @@ namespace RHI
 
 		std::unique_ptr<Semaphore>				CreateSemaphore(VkSemaphoreCreateFlags flags);
 		std::unique_ptr<Fence>						CreateFence(VkFenceCreateFlags flags);
+
+		// Advanced Products (Create Local Pools)
+		std::shared_ptr<CommandPool>		CreateCommandPool(QueueFamilyIndex& submit_queue_family_index,
+																												VkCommandPoolCreateFlags command_pool_flags);
+		std::shared_ptr<DescriptorPool>		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
+
+	public:
+		// Global Objects
+		std::shared_ptr<CommandPool>		GetGlobalOneTimeCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id = std::this_thread::get_id());
+		std::shared_ptr<CommandPool>		GetGlobalResetableCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id = std::this_thread::get_id());
+		
+		std::shared_ptr<DescriptorPool>		GetGlobalDescriptorPool(std::thread::id thread_id = std::this_thread::get_id());
+
+	private:
+		// Global Resource
+		using GlobalCommandPool = std::unordered_map<QueueFamilyIndex, std::shared_ptr<CommandPool>>;
+		std::unordered_map<std::thread::id, GlobalCommandPool> m_global_onetime_command_pools;
+		std::unordered_map<std::thread::id, GlobalCommandPool> m_global_resetable_command_pools;
+
+		using GlobalDescriptorPool = std::shared_ptr<DescriptorPool>;
+		std::unordered_map<std::thread::id, GlobalDescriptorPool> m_global_descriptor_pool;
 
 	private:
 		VulkanContext() = delete;
@@ -165,7 +183,7 @@ namespace RHI
 			{
 				.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 				.messageSeverity =
-				VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+				//VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
 				VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
 				VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
 				VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,

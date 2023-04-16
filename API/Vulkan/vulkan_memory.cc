@@ -105,7 +105,8 @@ namespace RHI
 	void VMA::Buffer::Copy(std::shared_ptr<Buffer> destination, 
 		VkDeviceSize size /* = ALL*/, VkDeviceSize offset_src/* = 0*/, VkDeviceSize offset_dst/* = 0*/)
 	{
-		auto commandBuffer = m_parent->m_context->GetOneTimeCommandBuffer();
+		auto commandBuffer = m_parent->m_context->
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
 		commandBuffer->Begin();
 		CopyCommand(commandBuffer, destination, size, offset_src, offset_dst);
 		commandBuffer->End();
@@ -218,7 +219,8 @@ namespace RHI
 
 	void VMA::Image::Write(std::shared_ptr<RHI::VMA::Buffer> data)
 	{
-		auto commandBuffer = m_parent->m_context->GetOneTimeCommandBuffer();
+		auto commandBuffer = m_parent->m_context->
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
 		commandBuffer->Begin();
 		WriteCommand(commandBuffer, data);
 		commandBuffer->End();
@@ -264,7 +266,8 @@ namespace RHI
 
 	void VMA::Image::TransitionLayout(VkImageLayout target_layout)
 	{
-		auto commandBuffer = m_parent->m_context->GetOneTimeCommandBuffer();
+		auto commandBuffer = m_parent->m_context->
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
 		commandBuffer->Begin();
 		TransitionLayoutCommand(commandBuffer, target_layout);
 		commandBuffer->End();

@@ -602,7 +602,7 @@ namespace RHI
 		VkCommandBufferBeginInfo commandBufferBeginInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-			.flags = 0,
+			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
 			.pInheritanceInfo = inheritanceInfo
 		};
 		if (vkBeginCommandBuffer(command_buffer, &commandBufferBeginInfo) != VK_SUCCESS)
@@ -649,7 +649,7 @@ namespace RHI
 
 	CommandPool::CommandPool(
 		std::shared_ptr<VulkanContext> vulkan_context,
-		uint32_t submit_queue_family_index,
+		QueueFamilyIndex& submit_queue_family_index,
 		VkCommandPoolCreateFlags command_pool_flags) :
 		m_context{ std::move(vulkan_context) },
 		m_submit_queue_family{ m_context->GetQueue(submit_queue_family_index) },
@@ -659,7 +659,7 @@ namespace RHI
 		{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 			.flags = command_pool_flags,
-			.queueFamilyIndex = submit_queue_family_index
+			.queueFamilyIndex = submit_queue_family_index.value()
 		};
 
 		if (vkCreateCommandPool(
@@ -731,7 +731,7 @@ namespace RHI
 		vkDestroyDescriptorPool(m_context->m_device, m_descriptor_pool, m_context->m_memory_allocation_callback);
 	}
 
-	std::shared_ptr<DescriptorSet> DescriptorPool::AllocateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings)
+	std::shared_ptr<DescriptorSet> DescriptorPool::AllocateDescriptorSet(const std::vector<VkDescriptorSetLayoutBinding>& descriptor_bindings)
 	{
 		auto descriptor_set = std::make_shared<DescriptorSet>(shared_from_this());
 
@@ -745,7 +745,7 @@ namespace RHI
 			m_context->m_device,
 			&descriptorSetLayoutCreateInfo,
 			m_context->m_memory_allocation_callback,
-			&(descriptor_set->descriptor_set_layout)) != VK_SUCCESS)
+			&(descriptor_set->m_descriptor_set_layout)) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Descriptor Set Layout!");
 		
 		VkDescriptorSetAllocateInfo descriptorSetAllocateInfo
@@ -753,7 +753,7 @@ namespace RHI
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 			.descriptorPool = m_descriptor_pool,
 			.descriptorSetCount = 1,
-			.pSetLayouts = &(descriptor_set->descriptor_set_layout)
+			.pSetLayouts = &(descriptor_set->m_descriptor_set_layout)
 		};
 
 		if (vkAllocateDescriptorSets(
@@ -767,7 +767,7 @@ namespace RHI
 
 	DescriptorSet::~DescriptorSet()
 	{
-		vkDestroyDescriptorSetLayout(m_parent->m_context->m_device, descriptor_set_layout, m_parent->m_context->m_memory_allocation_callback);
+		vkDestroyDescriptorSetLayout(m_parent->m_context->m_device, m_descriptor_set_layout, m_parent->m_context->m_memory_allocation_callback);
 	}
 
 	void DescriptorSet::WriteBuffer(VkDescriptorType buffer_type, uint32_t buffer_binding, std::shared_ptr<VMA::Buffer> data)

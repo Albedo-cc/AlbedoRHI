@@ -21,7 +21,7 @@ namespace RHI
 		destroy_vulkan_instance();
 	}
 
-	void VulkanContext::PresentSwapChain(std::vector<VkSemaphore> wait_semaphores) throw (swapchain_error)
+	void  VulkanContext::PresentSwapChain(const std::vector<VkSemaphore>& wait_semaphores) throw (swapchain_error)
 	{
 		VkPresentInfoKHR presentInfo
 		{
@@ -33,27 +33,7 @@ namespace RHI
 			.pImageIndices = &m_swapchain_current_image_index,
 			.pResults = nullptr // It is not necessary if you are only using a single swap chain
 		};
-		static VkQueue present_queue = GetQueue(m_device_queue_present.value());
-		auto result = vkQueuePresentKHR(present_queue, &presentInfo);
-		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
-			throw swapchain_error();
-		else if (result != VK_SUCCESS)
-			throw std::runtime_error("Failed to present the Vulkan Swap Chain!");
-	}
-
-	void VulkanContext::PresentSwapChain(VkSemaphore wait_semaphore)  throw (swapchain_error)
-	{
-		VkPresentInfoKHR presentInfo
-		{
-			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &wait_semaphore,
-			.swapchainCount = 1,
-			.pSwapchains = &m_swapchain,
-			.pImageIndices = &m_swapchain_current_image_index,
-			.pResults = nullptr // It is not necessary if you are only using a single swap chain
-		};
-		static VkQueue present_queue = GetQueue(m_device_queue_present.value());
+		static VkQueue present_queue = GetQueue(m_device_queue_family_present);
 		auto result = vkQueuePresentKHR(present_queue, &presentInfo);
 		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
 			throw swapchain_error();
@@ -73,13 +53,32 @@ namespace RHI
 		RECREATING = false;
 	}
 
-	std::shared_ptr<CommandBuffer> VulkanContext::GetOneTimeCommandBuffer()
+	std::shared_ptr<CommandBuffer> VulkanContext::
+		CreateOneTimeCommandBuffer(QueueFamilyIndex& submit_queue_family_index,
+			bool primary/* = true*/, std::thread::id thread_id/* = std::this_thread::get_id()*/)
 	{
-		static std::shared_ptr<CommandPool> commandPool_transient{ std::make_shared<CommandPool>(
-																							shared_from_this(), 
-																							 m_device_queue_graphics.value(), 
-																							 VK_COMMAND_POOL_CREATE_TRANSIENT_BIT)};
-		return commandPool_transient->AllocateCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+		auto& commandPool = m_global_onetime_command_pools[thread_id][submit_queue_family_index];
+		if (commandPool == nullptr)
+		{
+			log::info("Current thread created a new Global One-time Command Pool with submit queue family index {}", submit_queue_family_index.value());
+			commandPool = CreateCommandPool(submit_queue_family_index, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
+		}
+		auto level = primary ? VK_COMMAND_BUFFER_LEVEL_PRIMARY : VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+		return commandPool->AllocateCommandBuffer(level);
+	}
+
+	std::shared_ptr<CommandBuffer> VulkanContext::
+		CreateResetableCommandBuffer(QueueFamilyIndex& submit_queue_family_index, 
+			bool primary/* = true*/, std::thread::id thread_id/* = std::this_thread::get_id()*/)
+	{
+		auto& commandPool = m_global_resetable_command_pools[thread_id][submit_queue_family_index];
+		if (commandPool == nullptr)
+		{
+			log::info("Current thread created a new Global Resetable Command Pool with submit queue family index {}", submit_queue_family_index.value());
+			commandPool = CreateCommandPool(submit_queue_family_index, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+		}
+		auto level = primary ? VK_COMMAND_BUFFER_LEVEL_PRIMARY : VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+		return commandPool->AllocateCommandBuffer(level);
 	}
 
 	void VulkanContext::NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence, uint64_t timeout/* = std::numeric_limits<uint64_t>::max()*/)
@@ -315,8 +314,8 @@ namespace RHI
 																					  m_swapchain_image_count,
 																					  current_surface_capabilities.maxImageCount);
 
-		bool is_exclusive_device = (m_device_queue_graphics == m_device_queue_present);
-		uint32_t queue_family_indices[] { m_device_queue_graphics.value(), m_device_queue_present.value() };
+		bool is_exclusive_device = (m_device_queue_family_graphics == m_device_queue_family_present);
+		uint32_t queue_family_indices[] { m_device_queue_family_graphics.value(), m_device_queue_family_present.value() };
 		VkSwapchainCreateInfoKHR swapChainCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -452,11 +451,11 @@ namespace RHI
 	bool VulkanContext::check_physical_device_queue_families_support()
 	{
 		// Find Queue Families
-		m_device_queue_graphics.reset();
-		m_device_queue_present.reset();
-		m_device_queue_compute.reset();
-		m_device_queue_transfer.reset();
-		m_device_queue_sparsebinding.reset();
+		m_device_queue_family_graphics.reset();
+		m_device_queue_family_present.reset();
+		m_device_queue_family_compute.reset();
+		m_device_queue_family_transfer.reset();
+		m_device_queue_family_sparsebinding.reset();
 
 		uint32_t queueFamilyCount = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(m_physical_device, &queueFamilyCount, nullptr);
@@ -479,23 +478,23 @@ namespace RHI
 			vkGetPhysicalDeviceSurfaceSupportKHR(m_physical_device, idx, m_surface, &presentSupport);
 
 			// Any queue family with VK_QUEUE_GRAPHICS_BIT or VK_QUEUE_COMPUTE_BIT capabilities already implicitly support VK_QUEUE_TRANSFER_BIT operations
-			if (graphicsSupport && !m_device_queue_graphics.has_value())
-				m_device_queue_graphics = idx;
-			if (computeSupport && !m_device_queue_compute.has_value())
-				m_device_queue_compute = idx;
-			if (transferSupport && !m_device_queue_transfer.has_value())
-				m_device_queue_transfer = idx;
-			if (sparseBindingSupport && !m_device_queue_sparsebinding.has_value())
-				m_device_queue_sparsebinding = idx;
-			if (presentSupport == VK_TRUE && !m_device_queue_present.has_value())
-				m_device_queue_present = idx;
+			if (graphicsSupport && !m_device_queue_family_graphics.has_value())
+				m_device_queue_family_graphics = idx;
+			if (computeSupport && !m_device_queue_family_compute.has_value())
+				m_device_queue_family_compute = idx;
+			if (transferSupport && !m_device_queue_family_transfer.has_value())
+				m_device_queue_family_transfer = idx;
+			if (sparseBindingSupport && !m_device_queue_family_sparsebinding.has_value())
+				m_device_queue_family_sparsebinding = idx;
+			if (presentSupport == VK_TRUE && !m_device_queue_family_present.has_value())
+				m_device_queue_family_present = idx;
 
 			// The Graphics Queue Index is better to be same as the Present Queue Index.
 			if (graphicsSupport && (presentSupport == VK_TRUE) &&
-				(m_device_queue_graphics != m_device_queue_present))
+				(m_device_queue_family_graphics != m_device_queue_family_present))
 			{
-				m_device_queue_graphics = idx;
-				m_device_queue_present = idx;
+				m_device_queue_family_graphics = idx;
+				m_device_queue_family_present = idx;
 			}
 			++idx;
 		}// End Loop - find family
@@ -633,7 +632,7 @@ namespace RHI
 	}
 
 	std::shared_ptr<CommandPool> VulkanContext::
-		CreateCommandPool(uint32_t submit_queue_family_index,VkCommandPoolCreateFlags command_pool_flags)
+		CreateCommandPool(QueueFamilyIndex& submit_queue_family_index,VkCommandPoolCreateFlags command_pool_flags)
 	{
 		return std::make_shared<CommandPool>(shared_from_this(), submit_queue_family_index, command_pool_flags);
 	}
@@ -642,6 +641,61 @@ namespace RHI
 		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets)
 	{
 		return std::make_shared<DescriptorPool>(shared_from_this(), pool_size, limit_max_sets);
+	}
+
+	std::shared_ptr<DescriptorSet> VulkanContext::
+		CreateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings, std::thread::id thread_id/* = std::this_thread::get_id()*/)
+	{	
+		auto& descriptorPool = m_global_descriptor_pool[thread_id];
+		if (descriptorPool == nullptr)
+		{
+			const uint32_t OVERSIZE = 100;
+			std::vector<VkDescriptorPoolSize> descriptorPoolSize
+			{
+				{ VK_DESCRIPTOR_TYPE_SAMPLER, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, OVERSIZE }
+			};
+			const uint32_t MAX_ALLOCATABLE_SETS = OVERSIZE * descriptorPoolSize.size();
+			log::info("Current thread created a new Global Descriptor Pool with {} descriptors per type and you can allocate descriptor set {} times",
+				OVERSIZE, MAX_ALLOCATABLE_SETS);
+			
+			descriptorPool = std::make_shared<DescriptorPool>(shared_from_this(), descriptorPoolSize, MAX_ALLOCATABLE_SETS);
+		}
+		
+		return descriptorPool->AllocateDescriptorSet(descriptor_bindings);
+	}
+
+	std::shared_ptr<CommandPool> VulkanContext::
+		GetGlobalOneTimeCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id/*= std::this_thread::get_id()*/)
+	{
+		auto& commandPool = m_global_onetime_command_pools[thread_id][queue_family_index];
+		if (commandPool == nullptr) throw std::runtime_error("This thread has not create a Global One-Time Command Pool yet!");
+		return commandPool;
+	}
+
+	std::shared_ptr<CommandPool> VulkanContext::
+		GetGlobalResetableCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id/* = std::this_thread::get_id()*/)
+	{
+		auto& commandPool = m_global_resetable_command_pools[thread_id][queue_family_index];
+		if (commandPool == nullptr) throw std::runtime_error("This thread has not create a Global Resetable Command Pool yet!");
+		return commandPool;
+	}
+	
+	std::shared_ptr<DescriptorPool> VulkanContext::
+		GetGlobalDescriptorPool(std::thread::id thread_id/* = std::this_thread::get_id()*/)
+	{
+		auto& descriptorPool = m_global_descriptor_pool[thread_id];
+		if (descriptorPool == nullptr) throw std::runtime_error("This thread has not create a Global Descriptor Pool yet!");
+		return descriptorPool;
 	}
 
 	std::shared_ptr<Sampler> VulkanContext::
