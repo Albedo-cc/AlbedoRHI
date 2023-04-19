@@ -17,6 +17,7 @@ namespace RHI
 	class CommandBufferOneTime;
 
 	class DescriptorPool;		// Factory
+	class DescriptorSetLayout;
 	class DescriptorSet;
 	class DescriptorBinding;
 
@@ -262,33 +263,47 @@ namespace RHI
 			std::vector<VkPushConstantRange>* push_constants);
 	};
 
+	class DescriptorSetLayout // Future: Hash & Cache
+	{
+	public:
+		operator VkDescriptorSetLayout() { return m_descriptor_set_layout; }
+
+	public:
+		DescriptorSetLayout() = delete;
+		DescriptorSetLayout(std::shared_ptr<RHI::VulkanContext> vulkan_context, const std::vector<VkDescriptorSetLayoutBinding>& descriptor_bindings);
+		~DescriptorSetLayout();
+
+	private:
+		std::shared_ptr<RHI::VulkanContext> m_context;
+		VkDescriptorSetLayout m_descriptor_set_layout;
+	};
+
 	class DescriptorSet
 	{
-		friend class DescriptorPool;
 	public:
 		void WriteBuffer(VkDescriptorType buffer_type, uint32_t buffer_binding, std::shared_ptr<VMA::Buffer> data);
 		void WriteImage(VkDescriptorType image_type, uint32_t image_binding, std::shared_ptr<VMA::Image> data);
 		void WriteImages(VkDescriptorType image_type, std::vector<std::shared_ptr<VMA::Image>> data, uint32_t offset = 0);
 
-		VkDescriptorSetLayout& GetDescriptorSetLayout() { return m_descriptor_set_layout; }
+		std::shared_ptr<DescriptorSetLayout> GetDescriptorSetLayout() { return m_descriptor_set_layout; }
 
 	public:
 		DescriptorSet() = delete;
-		DescriptorSet(std::shared_ptr<DescriptorPool> parent) :m_parent{ std::move(parent) } {}
+		DescriptorSet(std::shared_ptr<DescriptorPool> parent, std::shared_ptr<DescriptorSetLayout> descriptor_set_layout);
 		~DescriptorSet();
 		operator VkDescriptorSet() { return m_descriptor_set; }
 
 	private:
 		std::shared_ptr<DescriptorPool> m_parent;
 		VkDescriptorSet m_descriptor_set = VK_NULL_HANDLE;
-		VkDescriptorSetLayout m_descriptor_set_layout = VK_NULL_HANDLE;
+		std::shared_ptr<DescriptorSetLayout> m_descriptor_set_layout;
 	};
 
 	class DescriptorPool : public std::enable_shared_from_this<DescriptorPool>
 	{
 		friend class DescriptorSet;
 	public:
-		std::shared_ptr<DescriptorSet> AllocateDescriptorSet(const std::vector<VkDescriptorSetLayoutBinding>& descriptor_bindings);
+		std::shared_ptr<DescriptorSet> AllocateDescriptorSet(std::shared_ptr<DescriptorSetLayout> descriptor_set_layout);
 
 	public:
 		DescriptorPool() = delete;

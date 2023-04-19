@@ -57,12 +57,7 @@ namespace RHI
 		CreateOneTimeCommandBuffer(QueueFamilyIndex& submit_queue_family_index,
 			bool primary/* = true*/, std::thread::id thread_id/* = std::this_thread::get_id()*/)
 	{
-		auto& commandPool = m_global_onetime_command_pools[thread_id][submit_queue_family_index];
-		if (commandPool == nullptr)
-		{
-			log::info("Current thread created a new Global One-time Command Pool with submit queue family index {}", submit_queue_family_index.value());
-			commandPool = CreateCommandPool(submit_queue_family_index, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
-		}
+		auto commandPool = GetGlobalOneTimeCommandPool(submit_queue_family_index, thread_id);
 		auto level = primary ? VK_COMMAND_BUFFER_LEVEL_PRIMARY : VK_COMMAND_BUFFER_LEVEL_SECONDARY;
 		return commandPool->AllocateCommandBuffer(level);
 	}
@@ -71,14 +66,108 @@ namespace RHI
 		CreateResetableCommandBuffer(QueueFamilyIndex& submit_queue_family_index, 
 			bool primary/* = true*/, std::thread::id thread_id/* = std::this_thread::get_id()*/)
 	{
-		auto& commandPool = m_global_resetable_command_pools[thread_id][submit_queue_family_index];
-		if (commandPool == nullptr)
-		{
-			log::info("Current thread created a new Global Resetable Command Pool with submit queue family index {}", submit_queue_family_index.value());
-			commandPool = CreateCommandPool(submit_queue_family_index, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-		}
+		auto commandPool = GetGlobalResetableCommandPool(submit_queue_family_index, thread_id);
 		auto level = primary ? VK_COMMAND_BUFFER_LEVEL_PRIMARY : VK_COMMAND_BUFFER_LEVEL_SECONDARY;
 		return commandPool->AllocateCommandBuffer(level);
+	}
+
+	void VulkanContext::Screenshot(
+		std::shared_ptr<VMA::Image> screenshot, 
+		std::vector<VkSemaphore> wait_semaphores/* = {}*/, 
+		std::vector<VkSemaphore> signal_semaphores/* = {}*/, 
+		VkFence fence/* = nullptr*/)
+	{
+		auto& extent = m_swapchain_current_extent;
+		VkImageBlit blitRegion
+		{
+			.srcSubresource
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.layerCount = 1
+			},
+			.srcOffsets = {{0,0,0}, {(int32_t)extent.width, (int32_t)extent.height , 1}}, // Boundary
+			.dstSubresource
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.layerCount = 1
+			},
+			.dstOffsets = {{0,0,0}, {(int32_t)screenshot->Width() , (int32_t)screenshot->Height() , 1}} // Boundary
+		};
+
+		VkImageMemoryBarrier barrier_present_to_transfer
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+			.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_swapchain_images[m_swapchain_current_image_index],
+			.subresourceRange
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			}
+		};
+
+		VkImageMemoryBarrier barrier_transfer_to_present
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+			.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_swapchain_images[m_swapchain_current_image_index],
+			.subresourceRange
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			}
+		};
+
+		auto commandBuffer = CreateOneTimeCommandBuffer(m_device_queue_family_transfer);
+		commandBuffer->Begin();
+		vkCmdPipelineBarrier(
+			*commandBuffer,
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			0x0,				// Dependency Flags
+			0, nullptr,	// Memory Barrier
+			0, nullptr,	// Buffer Memory Barrier
+			1, &barrier_present_to_transfer);
+		auto oldLayout = screenshot->GetImageLayout();
+		screenshot->TransitionLayoutCommand(commandBuffer,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+		vkCmdBlitImage(*commandBuffer,
+			m_swapchain_images[m_swapchain_current_image_index],
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			*screenshot,
+			screenshot->GetImageLayout(),
+			1, &blitRegion, VK_FILTER_LINEAR);
+
+		screenshot->TransitionLayoutCommand(commandBuffer, oldLayout);
+
+		vkCmdPipelineBarrier(
+			*commandBuffer,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			0x0,				// Dependency Flags
+			0, nullptr,	// Memory Barrier
+			0, nullptr,	// Buffer Memory Barrier
+			1, &barrier_transfer_to_present);
+		commandBuffer->End();
+		commandBuffer->Submit(true, fence, wait_semaphores, signal_semaphores,
+			VK_PIPELINE_STAGE_TRANSFER_BIT);
 	}
 
 	void VulkanContext::NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence, uint64_t timeout/* = std::numeric_limits<uint64_t>::max()*/)
@@ -325,7 +414,7 @@ namespace RHI
 			.imageColorSpace = m_swapchain_color_space,
 			.imageExtent = m_swapchain_current_extent,
 			.imageArrayLayers = 1,
-			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, // For Screenshot
 			.imageSharingMode = is_exclusive_device ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
 			.queueFamilyIndexCount = is_exclusive_device ? 0U : 2U,
 			.pQueueFamilyIndices = is_exclusive_device ? nullptr : queue_family_indices,
@@ -634,6 +723,7 @@ namespace RHI
 	std::shared_ptr<CommandPool> VulkanContext::
 		CreateCommandPool(QueueFamilyIndex& submit_queue_family_index,VkCommandPoolCreateFlags command_pool_flags)
 	{
+		if (!submit_queue_family_index.has_value()) throw std::runtime_error("Failed to create Vulkan Command Pool - Invalid Queue Family!");
 		return std::make_shared<CommandPool>(shared_from_this(), submit_queue_family_index, command_pool_flags);
 	}
 
@@ -643,42 +733,28 @@ namespace RHI
 		return std::make_shared<DescriptorPool>(shared_from_this(), pool_size, limit_max_sets);
 	}
 
+	std::shared_ptr<DescriptorSetLayout>	 VulkanContext::
+		CreateDescripotrSetLayout(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings)
+	{
+		return std::make_shared<DescriptorSetLayout>(shared_from_this(), descriptor_bindings);
+	}
+
 	std::shared_ptr<DescriptorSet> VulkanContext::
-		CreateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings, std::thread::id thread_id/* = std::this_thread::get_id()*/)
+		CreateDescriptorSet(std::shared_ptr<DescriptorSetLayout> descriptor_set_layout, std::thread::id thread_id/* = std::this_thread::get_id()*/)
 	{	
-		auto& descriptorPool = m_global_descriptor_pool[thread_id];
-		if (descriptorPool == nullptr)
-		{
-			const uint32_t OVERSIZE = 100;
-			std::vector<VkDescriptorPoolSize> descriptorPoolSize
-			{
-				{ VK_DESCRIPTOR_TYPE_SAMPLER, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, OVERSIZE },
-				{ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, OVERSIZE }
-			};
-			const uint32_t MAX_ALLOCATABLE_SETS = OVERSIZE * descriptorPoolSize.size();
-			log::info("Current thread created a new Global Descriptor Pool with {} descriptors per type and you can allocate descriptor set {} times",
-				OVERSIZE, MAX_ALLOCATABLE_SETS);
-			
-			descriptorPool = std::make_shared<DescriptorPool>(shared_from_this(), descriptorPoolSize, MAX_ALLOCATABLE_SETS);
-		}
-		
-		return descriptorPool->AllocateDescriptorSet(descriptor_bindings);
+		auto descriptorPool = GetGlobalDescriptorPool(thread_id);
+		return descriptorPool->AllocateDescriptorSet(descriptor_set_layout);
 	}
 
 	std::shared_ptr<CommandPool> VulkanContext::
 		GetGlobalOneTimeCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id/*= std::this_thread::get_id()*/)
 	{
 		auto& commandPool = m_global_onetime_command_pools[thread_id][queue_family_index];
-		if (commandPool == nullptr) throw std::runtime_error("This thread has not create a Global One-Time Command Pool yet!");
+		if (commandPool == nullptr)
+		{
+			log::info("Current thread created a new Global One-time Command Pool with submit queue family index {}", queue_family_index.value());
+			commandPool = CreateCommandPool(queue_family_index, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
+		}
 		return commandPool;
 	}
 
@@ -686,7 +762,11 @@ namespace RHI
 		GetGlobalResetableCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id/* = std::this_thread::get_id()*/)
 	{
 		auto& commandPool = m_global_resetable_command_pools[thread_id][queue_family_index];
-		if (commandPool == nullptr) throw std::runtime_error("This thread has not create a Global Resetable Command Pool yet!");
+		if (commandPool == nullptr)
+		{
+			log::info("Current thread created a new Global Resetable Command Pool with submit queue family index {}", queue_family_index.value());
+			commandPool = CreateCommandPool(queue_family_index, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+		}
 		return commandPool;
 	}
 	
@@ -694,7 +774,29 @@ namespace RHI
 		GetGlobalDescriptorPool(std::thread::id thread_id/* = std::this_thread::get_id()*/)
 	{
 		auto& descriptorPool = m_global_descriptor_pool[thread_id];
-		if (descriptorPool == nullptr) throw std::runtime_error("This thread has not create a Global Descriptor Pool yet!");
+		if (descriptorPool == nullptr)
+		{
+			constexpr uint32_t OVERSIZE = 100;
+			std::vector<VkDescriptorPoolSize> descriptorPoolSize
+			{
+				{ VK_DESCRIPTOR_TYPE_SAMPLER,										OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,	OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,							OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,							OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,			OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,			OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,						OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,						OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,	OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,	OVERSIZE },
+				{ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,					OVERSIZE }
+			};
+			const uint32_t MAX_ALLOCATABLE_SETS = OVERSIZE * descriptorPoolSize.size();
+			log::info("Current thread created a new Global Descriptor Pool with {} descriptors per type and you can allocate descriptor set {} times",
+				OVERSIZE, MAX_ALLOCATABLE_SETS);
+
+			descriptorPool = std::make_shared<DescriptorPool>(shared_from_this(), descriptorPoolSize, MAX_ALLOCATABLE_SETS);
+		}
 		return descriptorPool;
 	}
 

@@ -707,6 +707,30 @@ namespace RHI
 		return commandbuffer;
 	}
 
+	DescriptorSetLayout::DescriptorSetLayout(std::shared_ptr<RHI::VulkanContext> vulkan_context,
+		const std::vector<VkDescriptorSetLayoutBinding>& descriptor_bindings) :
+		m_context{ std::move(vulkan_context) }
+	{
+		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = static_cast<uint32_t>(descriptor_bindings.size()),
+			.pBindings = descriptor_bindings.data()
+		};
+
+		if (vkCreateDescriptorSetLayout(
+			m_context->m_device,
+			&descriptorSetLayoutCreateInfo,
+			m_context->m_memory_allocation_callback,
+			&m_descriptor_set_layout) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create the Vulkan Descriptor Set Layout!");
+	}
+
+	DescriptorSetLayout::~DescriptorSetLayout()
+	{
+		vkDestroyDescriptorSetLayout(m_context->m_device, m_descriptor_set_layout, m_context->m_memory_allocation_callback);
+	}
+
 	DescriptorPool::DescriptorPool(std::shared_ptr<RHI::VulkanContext> vulkan_context, 
 		const std::vector<VkDescriptorPoolSize>& pool_size, uint32_t limit_max_sets) :
 		m_context{ std::move(vulkan_context) }
@@ -714,6 +738,7 @@ namespace RHI
 		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
 			.maxSets = limit_max_sets,
 			.poolSizeCount = static_cast<uint32_t>(pool_size.size()),
 			.pPoolSizes = pool_size.data()
@@ -731,43 +756,34 @@ namespace RHI
 		vkDestroyDescriptorPool(m_context->m_device, m_descriptor_pool, m_context->m_memory_allocation_callback);
 	}
 
-	std::shared_ptr<DescriptorSet> DescriptorPool::AllocateDescriptorSet(const std::vector<VkDescriptorSetLayoutBinding>& descriptor_bindings)
+	std::shared_ptr<DescriptorSet> DescriptorPool::
+		AllocateDescriptorSet(std::shared_ptr<DescriptorSetLayout> descriptor_set_layout)
 	{
-		auto descriptor_set = std::make_shared<DescriptorSet>(shared_from_this());
+		return std::make_shared<DescriptorSet>(shared_from_this(), descriptor_set_layout);
+	}
 
-		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo
-		{
-			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-			.bindingCount = static_cast<uint32_t>(descriptor_bindings.size()),
-			.pBindings = descriptor_bindings.data()
-		};
-		if (vkCreateDescriptorSetLayout(
-			m_context->m_device,
-			&descriptorSetLayoutCreateInfo,
-			m_context->m_memory_allocation_callback,
-			&(descriptor_set->m_descriptor_set_layout)) != VK_SUCCESS)
-			throw std::runtime_error("Failed to create the Vulkan Descriptor Set Layout!");
-		
+	DescriptorSet::DescriptorSet(std::shared_ptr<DescriptorPool> parent, std::shared_ptr<DescriptorSetLayout> descriptor_set_layout)
+		:m_parent{ std::move(parent) }, m_descriptor_set_layout{ std::move(descriptor_set_layout) }
+	{
+		VkDescriptorSetLayout layout = *m_descriptor_set_layout;
 		VkDescriptorSetAllocateInfo descriptorSetAllocateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-			.descriptorPool = m_descriptor_pool,
+			.descriptorPool = *m_parent,
 			.descriptorSetCount = 1,
-			.pSetLayouts = &(descriptor_set->m_descriptor_set_layout)
+			.pSetLayouts = &layout
 		};
 
 		if (vkAllocateDescriptorSets(
-			m_context->m_device,
+			m_parent->m_context->m_device,
 			&descriptorSetAllocateInfo,
-			&(descriptor_set->m_descriptor_set)) != VK_SUCCESS)
+			&m_descriptor_set) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Descriptor Sets!");
-
-		return descriptor_set;
 	}
 
 	DescriptorSet::~DescriptorSet()
 	{
-		vkDestroyDescriptorSetLayout(m_parent->m_context->m_device, m_descriptor_set_layout, m_parent->m_context->m_memory_allocation_callback);
+		vkFreeDescriptorSets(m_parent->m_context->m_device, *m_parent, 1, &m_descriptor_set);
 	}
 
 	void DescriptorSet::WriteBuffer(VkDescriptorType buffer_type, uint32_t buffer_binding, std::shared_ptr<VMA::Buffer> data)

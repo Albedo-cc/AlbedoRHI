@@ -106,7 +106,7 @@ namespace RHI
 		VkDeviceSize size /* = ALL*/, VkDeviceSize offset_src/* = 0*/, VkDeviceSize offset_dst/* = 0*/)
 	{
 		auto commandBuffer = m_parent->m_context->
-			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_transfer);
 		commandBuffer->Begin();
 		CopyCommand(commandBuffer, destination, size, offset_src, offset_dst);
 		commandBuffer->End();
@@ -220,7 +220,7 @@ namespace RHI
 	void VMA::Image::Write(std::shared_ptr<RHI::VMA::Buffer> data)
 	{
 		auto commandBuffer = m_parent->m_context->
-			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_transfer);
 		commandBuffer->Begin();
 		WriteCommand(commandBuffer, data);
 		commandBuffer->End();
@@ -267,7 +267,7 @@ namespace RHI
 	void VMA::Image::TransitionLayout(VkImageLayout target_layout)
 	{
 		auto commandBuffer = m_parent->m_context->
-			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_transfer);
 		commandBuffer->Begin();
 		TransitionLayoutCommand(commandBuffer, target_layout);
 		commandBuffer->End();
@@ -316,7 +316,7 @@ namespace RHI
 
 	VkImageMemoryBarrier VMA::Image::
 		deduce_transition_layout_barrier(VkImageLayout target_layout, 
-			VkPipelineStageFlags& stage_src, VkPipelineStageFlags& stage_dst)
+		VkPipelineStageFlags& stage_src, VkPipelineStageFlags& stage_dst)
 	{
 		// Barriers are primarily used for synchronization purposes, so you must specify which types of operations that involve 
 		//the resource must happen before the barrier, 
@@ -351,6 +351,18 @@ namespace RHI
 			stage_src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 			stage_dst = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 		}
+		else if ( // Undefined Image => Shader Read-only Image
+			VK_IMAGE_LAYOUT_UNDEFINED == m_image_layout &&
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL == target_layout)
+		{
+			imageAspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+			srcAccessMask = 0;
+			dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+			stage_src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			stage_dst = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		}
 		else if ( // Transfer Destination Image => Shader Read-only Image
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == m_image_layout &&
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL == target_layout)
@@ -362,6 +374,18 @@ namespace RHI
 
 			stage_src = VK_PIPELINE_STAGE_TRANSFER_BIT;
 			stage_dst = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		}
+		else if ( // Shader Read-only Image => Transfer Destination Image
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL == m_image_layout &&
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == target_layout)
+		{
+			imageAspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+			srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+			stage_src = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			stage_dst = VK_PIPELINE_STAGE_TRANSFER_BIT;
 		}
 		else throw std::invalid_argument("Failed to transition the Vulkan Image Layout - Unsupported layout transition!");
 

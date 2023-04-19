@@ -75,7 +75,7 @@ namespace RHI
 																									 /*VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME*/ };
 #else
 		std::vector<const char*>			m_validation_layers{ "VK_LAYER_KHRONOS_validation",
-																								 "VK_LAYER_RENDERDOC_Capture" };
+																								  "VK_LAYER_RENDERDOC_Capture" };
 
 		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 																									 VK_EXT_DEBUG_MARKER_EXTENSION_NAME,
@@ -83,11 +83,12 @@ namespace RHI
 #endif	
 
 	public:
-		void WaitDeviceIdle() { vkDeviceWaitIdle(m_device); }		
+		void WaitDeviceIdle() { vkDeviceWaitIdle(m_device); }	
 
 		VkQueue GetQueue(QueueFamilyIndex& queue_family_index, uint32_t queue_index = 0) { VkQueue res; vkGetDeviceQueue(m_device, queue_family_index.value(), queue_index, &res); return res; }
 
 		// Swapchain Functions (throw swapchain_error means recreation)
+		void Screenshot(std::shared_ptr<VMA::Image> screenshot, std::vector<VkSemaphore> wait_semaphores = {}, std::vector<VkSemaphore> signal_semaphores = {}, VkFence fence = nullptr);
 		void NextSwapChainImageIndex(VkSemaphore semaphore, VkFence fence,
 			uint64_t timeout = std::numeric_limits<uint64_t>::max()) throw (swapchain_error);
 		void PresentSwapChain(const std::vector<VkSemaphore>& wait_semaphore) throw (swapchain_error);
@@ -97,32 +98,33 @@ namespace RHI
 		static std::shared_ptr<VulkanContext>	 Create(GLFWwindow* window); // Create Vulkan Context
 
 		// Common Products (Command Buffers and Descriptor Sets are created from Global Pools with Lazy Creation)
-		std::weak_ptr<VulkanContext>			CreateVulkanContextView() { return shared_from_this(); }
+		std::weak_ptr<VulkanContext>				CreateVulkanContextView() { return shared_from_this(); }
 
-		std::shared_ptr<CommandBuffer>	CreateOneTimeCommandBuffer(QueueFamilyIndex& submit_queue_family_index, bool primary = true, std::thread::id thread_id = std::this_thread::get_id());
-		std::shared_ptr<CommandBuffer>	CreateResetableCommandBuffer(QueueFamilyIndex& submit_queue_family_index, bool primary = true, std::thread::id thread_id = std::this_thread::get_id());
+		std::shared_ptr<CommandBuffer>		CreateOneTimeCommandBuffer(QueueFamilyIndex& submit_queue_family_index, bool primary = true, std::thread::id thread_id = std::this_thread::get_id());
+		std::shared_ptr<CommandBuffer>		CreateResetableCommandBuffer(QueueFamilyIndex& submit_queue_family_index, bool primary = true, std::thread::id thread_id = std::this_thread::get_id());
 
-		std::shared_ptr<DescriptorSet>			CreateDescriptorSet(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings, std::thread::id thread_id = std::this_thread::get_id());
+		std::shared_ptr<DescriptorSetLayout>	CreateDescripotrSetLayout(std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings);
+		std::shared_ptr<DescriptorSet>				CreateDescriptorSet(std::shared_ptr<DescriptorSetLayout> descriptor_set_layout, std::thread::id thread_id = std::this_thread::get_id());
 
-		std::shared_ptr<Sampler>					CreateSampler(VkSamplerAddressMode address_mode,
-																									VkBorderColor border_color = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
-																									VkCompareOp compare_mode = VK_COMPARE_OP_NEVER,
-																									bool anisotropy_enable = true);
+		std::shared_ptr<Sampler>						CreateSampler(VkSamplerAddressMode address_mode,
+																										VkBorderColor border_color = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+																										VkCompareOp compare_mode = VK_COMPARE_OP_NEVER,
+																										bool anisotropy_enable = true);
 
-		std::unique_ptr<Semaphore>				CreateSemaphore(VkSemaphoreCreateFlags flags);
-		std::unique_ptr<Fence>						CreateFence(VkFenceCreateFlags flags);
+		std::unique_ptr<Semaphore>					CreateSemaphore(VkSemaphoreCreateFlags flags);
+		std::unique_ptr<Fence>							CreateFence(VkFenceCreateFlags flags);
 
 		// Advanced Products (Create Local Pools)
-		std::shared_ptr<CommandPool>		CreateCommandPool(QueueFamilyIndex& submit_queue_family_index,
-																												VkCommandPoolCreateFlags command_pool_flags);
-		std::shared_ptr<DescriptorPool>		CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
+		std::shared_ptr<CommandPool>			CreateCommandPool(QueueFamilyIndex& submit_queue_family_index,
+																													VkCommandPoolCreateFlags command_pool_flags);
+		std::shared_ptr<DescriptorPool>			CreateDescriptorPool(std::vector<VkDescriptorPoolSize> pool_size, uint32_t limit_max_sets);
 
 	public:
 		// Global Objects
-		std::shared_ptr<CommandPool>		GetGlobalOneTimeCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id = std::this_thread::get_id());
-		std::shared_ptr<CommandPool>		GetGlobalResetableCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id = std::this_thread::get_id());
+		std::shared_ptr<CommandPool>			GetGlobalOneTimeCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id = std::this_thread::get_id());
+		std::shared_ptr<CommandPool>			GetGlobalResetableCommandPool(QueueFamilyIndex& queue_family_index, std::thread::id thread_id = std::this_thread::get_id());
 		
-		std::shared_ptr<DescriptorPool>		GetGlobalDescriptorPool(std::thread::id thread_id = std::this_thread::get_id());
+		std::shared_ptr<DescriptorPool>			GetGlobalDescriptorPool(std::thread::id thread_id = std::this_thread::get_id());
 
 	private:
 		// Global Resource

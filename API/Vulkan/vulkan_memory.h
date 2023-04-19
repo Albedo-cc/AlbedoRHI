@@ -74,6 +74,9 @@ namespace RHI
 			VkSampler GetImageSampler();
 			bool HasStencilComponent();
 			VkDeviceSize Size();
+			uint32_t Width() const { return m_image_width; }
+			uint32_t Height() const { return m_image_height; }
+			uint32_t Channel() const { return m_image_channel; }
 
 		public:
 			Image() = delete;
@@ -95,7 +98,7 @@ namespace RHI
 			uint32_t m_image_channel;
 			uint32_t m_mipmap_level;
 
-		private:
+		public:
 			VkImageMemoryBarrier deduce_transition_layout_barrier(VkImageLayout target_layout, VkPipelineStageFlags& stage_src, VkPipelineStageFlags& stage_dst);
 		};
 
@@ -105,7 +108,7 @@ namespace RHI
 		std::shared_ptr<Image> AllocateImage(	VkImageAspectFlags aspect,
 																				VkImageUsageFlags usage,
 																				uint32_t width, uint32_t height, 
-																				uint32_t channel, VkFormat format, 
+																				uint32_t channel, VkFormat format,
 																				VkImageTiling tiling_mode = VK_IMAGE_TILING_OPTIMAL,
 																				uint32_t miplevel = 1);
 		std::shared_ptr<Buffer> AllocateStagingBuffer(VkDeviceSize buffer_size);

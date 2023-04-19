@@ -19140,7 +19140,7 @@ Here are some other, less obvious use cases and their recommended settings:
   - Use VmaAllocationCreateInfo::flags = #VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
 
 
-\page configuration Configuration
+\page configuration Parameters
 
 Please check "CONFIGURATION SECTION" in the code to find macros that you can define
 before each include of this file or change directly in this file to provide
