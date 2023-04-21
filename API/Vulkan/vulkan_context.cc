@@ -44,8 +44,8 @@ namespace RHI
 	void VulkanContext::RecreateSwapChain()
 	{
 		static bool RECREATING = false;
-		if (RECREATING) throw std::runtime_error("Failed to recreate the Swap Chain - more than one caller at the same time!");
-		
+		if (RECREATING) return;
+
 		WaitDeviceIdle();
 		RECREATING = true;
 		destroy_swap_chain();
@@ -372,16 +372,17 @@ namespace RHI
 
 		// Begin(Choose Swap Extent (resolution of images in swap chain))
 		{
-			constexpr const uint32_t SPECIAL_VALUE_OF_WINDOW_MANAGER = std::numeric_limits<uint32_t>::max(); // More details in textbook P85
+			constexpr uint32_t SPECIAL_VALUE_OF_WINDOW_MANAGER = std::numeric_limits<uint32_t>::max(); // More details in textbook P85
 			if (current_surface_capabilities.currentExtent.height == SPECIAL_VALUE_OF_WINDOW_MANAGER)
 			{
 				int width, height;
 				glfwGetFramebufferSize(m_window, &width, &height);
-				while (width == 0 || height == 0)
+				while (width <= 0 || height <= 0)
 				{
+
 					glfwGetFramebufferSize(m_window, &width, &height);
 					glfwWaitEvents();
-				}
+				}				
 
 				m_swapchain_current_extent = VkExtent2D
 				{
@@ -393,7 +394,17 @@ namespace RHI
 														current_surface_capabilities.maxImageExtent.height)
 				};
 			}
-			else m_swapchain_current_extent = current_surface_capabilities.currentExtent;
+			else
+			{
+				while (current_surface_capabilities.currentExtent.width <= 0 ||
+					current_surface_capabilities.currentExtent.height <= 0)
+				{
+					vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+						m_physical_device, m_surface, &current_surface_capabilities);
+					glfwWaitEvents();
+				}
+				m_swapchain_current_extent = current_surface_capabilities.currentExtent;
+			}
 		} // End(Choose Swap Extent (resolution of images in swap chain)
 
 		// Decide how many images we would like to have in the swap chain
