@@ -63,7 +63,8 @@ namespace RHI
 		std::vector<std::pair<QueueFamilyIndex*, std::vector<float>>>
 			m_required_queue_families_with_priorities{
 				{&m_device_queue_family_graphics,		{1.0f}},
-				{&m_device_queue_family_present,		{1.0f }}};
+				{&m_device_queue_family_transfer,			{1.0f}},
+				{&m_device_queue_family_present,			{1.0f }}};
 
 		std::vector<VkPresentModeKHR> m_surface_present_modes;
 		std::vector<VkSurfaceFormatKHR> m_surface_formats; // 1.VK_FORMAT_X 2. VK_COLOR_SPACE_X
@@ -74,12 +75,12 @@ namespace RHI
 		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 																									 /*VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME*/ };
 #else
-		std::vector<const char*>			m_validation_layers{ "VK_LAYER_KHRONOS_validation",
-																								  "VK_LAYER_RENDERDOC_Capture" };
+		std::vector<const char*>			m_validation_layers{ "VK_LAYER_KHRONOS_validation"
+																								/* ,"VK_LAYER_RENDERDOC_Capture" */};
 
-		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-																									 VK_EXT_DEBUG_MARKER_EXTENSION_NAME,
-																									 /*VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME*/ };
+		std::vector<const char*>			m_device_extensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME
+																									/* ,VK_EXT_DEBUG_MARKER_EXTENSION_NAME*/
+																									/*,VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME*/ };
 #endif	
 
 	public:

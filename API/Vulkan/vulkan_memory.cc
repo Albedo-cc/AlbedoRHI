@@ -106,7 +106,7 @@ namespace RHI
 		VkDeviceSize size /* = ALL*/, VkDeviceSize offset_src/* = 0*/, VkDeviceSize offset_dst/* = 0*/)
 	{
 		auto commandBuffer = m_parent->m_context->
-			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_transfer);
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
 		commandBuffer->Begin();
 		CopyCommand(commandBuffer, destination, size, offset_src, offset_dst);
 		commandBuffer->End();
@@ -142,6 +142,7 @@ namespace RHI
 		VkImageUsageFlags usage,
 		uint32_t width, uint32_t height,
 		uint32_t channel, VkFormat format,
+		VkImageLayout layout/* = VK_IMAGE_LAYOUT_UNDEFINED*/,
 		VkImageTiling tiling_mode/* = VK_IMAGE_TILING_OPTIMAL*/,
 		uint32_t miplevel/* = 1*/)
 	{
@@ -183,6 +184,7 @@ namespace RHI
 		image->m_image_height = height;
 		image->m_image_channel = channel;
 		image->m_mipmap_level = miplevel;
+		//image->m_image_layout = layout; (AUTO)
 
 		VkImageViewCreateInfo imageViewCreateInfo
 		{
@@ -208,6 +210,9 @@ namespace RHI
 			) != VK_SUCCESS)
 			throw std::runtime_error("Failed to create the Vulkan Image View!");
 
+		// Transition Layout
+		if (VK_IMAGE_LAYOUT_UNDEFINED != layout) image->TransitionLayout(layout);
+
 		return image;
 	}
 	
@@ -220,7 +225,7 @@ namespace RHI
 	void VMA::Image::Write(std::shared_ptr<RHI::VMA::Buffer> data)
 	{
 		auto commandBuffer = m_parent->m_context->
-			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_transfer);
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
 		commandBuffer->Begin();
 		WriteCommand(commandBuffer, data);
 		commandBuffer->End();
@@ -254,9 +259,54 @@ namespace RHI
 			.imageExtent = {m_image_width, m_image_height, 1}
 		};
 
+		auto oldLayout = m_image_layout;
 		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 		vkCmdCopyBufferToImage(*commandBuffer, *data, m_image, m_image_layout, 1, &copyRegion);
-		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		TransitionLayoutCommand(commandBuffer, m_image_layout);
+	}
+
+	void VMA::Image::WriteAndTransition(std::shared_ptr<Buffer> data, VkImageLayout final_layout)
+	{
+		auto commandBuffer = m_parent->m_context->
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
+		commandBuffer->Begin();
+		WriteAndTransitionCommand(commandBuffer, data, final_layout);
+		commandBuffer->End();
+		commandBuffer->Submit(true); // Must wait for transfer operation
+	}
+
+	void VMA::Image::WriteAndTransitionCommand(
+		std::shared_ptr<RHI::CommandBuffer> commandBuffer, 
+		std::shared_ptr<Buffer> data, VkImageLayout final_layout)
+	{
+		assert(commandBuffer->IsRecording() &&
+			"You have to ensure that the command buffer is recording while using XXXCommand funcitons!");
+		assert(data->Size() <= Size() && "It is not recommanded to write the image from a bigger buffer!");
+		if (m_image_channel != 4) log::warn("Writing a {} channels image, but automatically treating it as 4 channels", m_image_channel);
+
+		// Staging Buffer
+		size_t image_size = static_cast<size_t>(m_image_width) * m_image_height * 4;
+
+		// Copy buffer to image requires the image to be in the right layout first
+		VkBufferImageCopy copyRegion
+		{
+			.bufferOffset = 0,
+			.bufferRowLength = 0,
+			.bufferImageHeight = 0,
+			.imageSubresource
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.mipLevel = 0,
+				.baseArrayLayer = 0,
+				.layerCount = 1,
+			},
+			.imageOffset = {0,0,0},
+			.imageExtent = {m_image_width, m_image_height, 1}
+		};
+
+		TransitionLayoutCommand(commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		vkCmdCopyBufferToImage(*commandBuffer, *data, m_image, m_image_layout, 1, &copyRegion);
+		TransitionLayoutCommand(commandBuffer, final_layout);
 	}
 
 	void VMA::Image::BindSampler(std::shared_ptr<RHI::Sampler> sampler)
@@ -267,7 +317,7 @@ namespace RHI
 	void VMA::Image::TransitionLayout(VkImageLayout target_layout)
 	{
 		auto commandBuffer = m_parent->m_context->
-			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_transfer);
+			CreateOneTimeCommandBuffer(m_parent->m_context->m_device_queue_family_graphics);
 		commandBuffer->Begin();
 		TransitionLayoutCommand(commandBuffer, target_layout);
 		commandBuffer->End();
@@ -346,7 +396,7 @@ namespace RHI
 
 			srcAccessMask = 0;
 			dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+											 VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
 			stage_src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 			stage_dst = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;

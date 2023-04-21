@@ -134,11 +134,11 @@ namespace RHI
 			}
 		};
 
-		auto commandBuffer = CreateOneTimeCommandBuffer(m_device_queue_family_transfer);
+		auto commandBuffer = CreateOneTimeCommandBuffer(m_device_queue_family_graphics);
 		commandBuffer->Begin();
 		vkCmdPipelineBarrier(
 			*commandBuffer,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_PIPELINE_STAGE_TRANSFER_BIT,
 			0x0,				// Dependency Flags
 			0, nullptr,	// Memory Barrier
@@ -160,7 +160,7 @@ namespace RHI
 		vkCmdPipelineBarrier(
 			*commandBuffer,
 			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			0x0,				// Dependency Flags
 			0, nullptr,	// Memory Barrier
 			0, nullptr,	// Buffer Memory Barrier
@@ -434,8 +434,8 @@ namespace RHI
 																			m_swapchain_current_extent.width,
 																			m_swapchain_current_extent.height,
 																			m_swapchain_depth_channel + m_swapchain_stencil_channel,
-																			m_swapchain_depth_stencil_format);
-		m_swapchain_depth_stencil_image->TransitionLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+																			m_swapchain_depth_stencil_format,
+																			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
 		// Retrieve the swap chain images
 		vkGetSwapchainImagesKHR(m_device, m_swapchain, &m_swapchain_image_count, nullptr);
@@ -585,6 +585,13 @@ namespace RHI
 				m_device_queue_family_graphics = idx;
 				m_device_queue_family_present = idx;
 			}
+
+			// The Transfer Queue Index is better to be different from the Graphics Queue Index.
+			if (transferSupport && (m_device_queue_family_transfer == m_device_queue_family_graphics))
+			{
+				m_device_queue_family_transfer = idx;
+			}
+
 			++idx;
 		}// End Loop - find family
 

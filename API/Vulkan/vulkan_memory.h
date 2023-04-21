@@ -64,13 +64,15 @@ namespace RHI
 		public:
 			void Write(std::shared_ptr<Buffer> data); // Write from Staging Buffer
 			void WriteCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, std::shared_ptr<Buffer> data); // Write from Staging Buffer
+			void WriteAndTransition(std::shared_ptr<Buffer> data, VkImageLayout final_layout);
+			void WriteAndTransitionCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, std::shared_ptr<Buffer> data, VkImageLayout final_layout);
 			void BindSampler(std::shared_ptr<RHI::Sampler> sampler);
 
 			void TransitionLayout(VkImageLayout target_layout);
 			void TransitionLayoutCommand(std::shared_ptr<RHI::CommandBuffer> commandBuffer, VkImageLayout target_layout);
 
-			VkImageLayout& GetImageLayout() { return m_image_layout; }
-			VkImageView& GetImageView() { return m_image_view; }
+			VkImageLayout GetImageLayout() { return m_image_layout; }
+			VkImageView GetImageView() { return m_image_view; }
 			VkSampler GetImageSampler();
 			bool HasStencilComponent();
 			VkDeviceSize Size();
@@ -109,6 +111,7 @@ namespace RHI
 																				VkImageUsageFlags usage,
 																				uint32_t width, uint32_t height, 
 																				uint32_t channel, VkFormat format,
+																				VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED,
 																				VkImageTiling tiling_mode = VK_IMAGE_TILING_OPTIMAL,
 																				uint32_t miplevel = 1);
 		std::shared_ptr<Buffer> AllocateStagingBuffer(VkDeviceSize buffer_size);
