@@ -165,7 +165,6 @@ namespace RHI
 		virtual ~RenderPass() noexcept;
 	};
 
-
 	class DescriptorBinding
 	{
 	public:

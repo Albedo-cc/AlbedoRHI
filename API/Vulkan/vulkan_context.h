@@ -64,7 +64,7 @@ namespace RHI
 			m_required_queue_families_with_priorities{
 				{&m_device_queue_family_graphics,		{1.0f}},
 				{&m_device_queue_family_transfer,			{1.0f}},
-				{&m_device_queue_family_present,			{1.0f }}};
+				{&m_device_queue_family_present,			{1.0f}}};
 
 		std::vector<VkPresentModeKHR> m_surface_present_modes;
 		std::vector<VkSurfaceFormatKHR> m_surface_formats; // 1.VK_FORMAT_X 2. VK_COLOR_SPACE_X
