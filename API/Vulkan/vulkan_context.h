@@ -22,8 +22,11 @@ namespace RHI
 	{
 	public:
 		VkInstance								m_instance									= VK_NULL_HANDLE;
-		VkSurfaceKHR							m_surface										= VK_NULL_HANDLE;
 		GLFWwindow*							m_window										= VK_NULL_HANDLE;
+
+		VkSurfaceKHR							m_surface										= VK_NULL_HANDLE;
+		std::vector<VkSurfaceFormatKHR>	m_surface_formats;	
+		std::vector<VkPresentModeKHR>		m_surface_present_modes;
 
 		VkPhysicalDevice						m_physical_device						= VK_NULL_HANDLE;
 		VkPhysicalDeviceFeatures		m_physical_device_features;
@@ -65,9 +68,6 @@ namespace RHI
 				{&m_device_queue_family_graphics,		{1.0f}},
 				{&m_device_queue_family_transfer,			{1.0f}},
 				{&m_device_queue_family_present,			{1.0f}}};
-
-		std::vector<VkPresentModeKHR> m_surface_present_modes;
-		std::vector<VkSurfaceFormatKHR> m_surface_formats; // 1.VK_FORMAT_X 2. VK_COLOR_SPACE_X
 		
 #ifdef NDEBUG
 		std::vector<const char*>			m_validation_layers{"VK_LAYER_RENDERDOC_Capture"};
@@ -180,7 +180,7 @@ namespace RHI
 		enum vulkan_message_type { VERBOSE, INFO, WARN, ERROR, MAX_MESSAGE_TYPE };
 		static std::vector<uint32_t> s_debug_message_statistics;
 
-		static auto GetDefaultDebuggerMessengerCreateInfo()
+		inline static auto GetDefaultDebuggerMessengerCreateInfo()
 		{
 			return VkDebugUtilsMessengerCreateInfoEXT
 			{
@@ -199,7 +199,7 @@ namespace RHI
 			};
 		}
 
-		static VKAPI_ATTR VkBool32 VKAPI_CALL 
+		inline static VKAPI_ATTR VkBool32 VKAPI_CALL 
 		callback_debug_messenger
 			(
 				VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
